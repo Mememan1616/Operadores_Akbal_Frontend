@@ -232,7 +232,8 @@ export default function FinProduccion() {
     const hora = obtenerHoraActual();
     const fecha = hoy();
     const data = { hora_termino: hora, 
-      fecha_termino:fecha };
+      fecha_termino:fecha,
+    estatus: false };
     const cierre_produccion = await ApiService.updateProduccion(claveProduccion, data);
     console.log(cierre_produccion);
     const cierre_paro = await ApiService.updateRegistroParo(claveParo, data);

@@ -45,17 +45,20 @@ const iconMap = {
 };
 
 export default function Operadores() {
-  const { claveProduccion, tipo_cierreContext , setTipoCierreContext} = useProduccion();
+  const { claveProduccion, tipo_cierreContext, setTipoCierreContext } = useProduccion();
   const { claveParo, iniciarParo, terminarParo } = useParo();
-   const datosCorreo = useContext(EnviarCorreoxHora);
+  const [dataParo, setDataParo] = useState({});
+  const datosCorreo = useContext(EnviarCorreoxHora);
   //const [paroTime, setParoTime] = useState(0);
   const [paros, setParos] = useState([]);
-  const [selectedParo, setSelectedParo] = useState(null);
+
   const [showModal, setShowModal] = useState(false);
   const [claveParoTemp, setClaveParo] = useState('');
   const [showModalConfirmar, setShowModalConfirmar] = useState(false);
   const [tipoCierre, setTipoCierre] = useState('');
   const [textModal, setTextModal] = useState('');
+
+  const [horaInicioParo, setHoraInicioParo] = useState('');
   const { user } = useContext(AuthContext);
   // const { logout } = useContext(AuthContext);
   //const { claveProduccion, setClaveProduccion } = useProduccion();
@@ -71,57 +74,68 @@ export default function Operadores() {
   const isInitialLoad = useRef(false);
   const cronometroIniciado = useRef(false);
 
+  const [selectedParo, setSelectedParo] = useState(null);
+
   // Efecto para manejar el cronómetro cuando isParo es true
- // --- EFECTO 1: CARGA DE DATOS (UNIFICADO Y PROTEGIDO) ---
-useEffect(() => {
-  // Solo ejecutamos si hay clave y no hemos cargado ya
-  if (!claveProduccion || isInitialLoad.current) return;
+  // --- EFECTO 1: CARGA DE DATOS (UNIFICADO Y PROTEGIDO) ---
+  useEffect(() => {
+    // Solo ejecutamos si hay clave y no hemos cargado ya
+    if (!claveProduccion || isInitialLoad.current) return;
 
-  const cargarInformacionIncial = async () => {
-    isInitialLoad.current = true; // Bloqueo inmediato
-    try {
-      const response = await ApiService.getProduccion(claveProduccion);
-      if (response && response.result) {
-        setDataRegistro(response);
-        setMaquina(response.result.maquina);
-        
-        // Cargamos paros inmediatamente después
-        if (response.result.id_maquina) {
-          const resParos = await ApiService.getParosByMaquina(response.result.id_maquina);
-          setParos(Array.isArray(resParos?.result) ? resParos.result : []);
+    const cargarInformacionIncial = async () => {
+      isInitialLoad.current = true; // Bloqueo inmediato
+      try {
+        const response = await ApiService.getProduccion(claveProduccion);
+        if (response && response.result) {
+          setDataRegistro(response);
+          setMaquina(response.result.maquina);
+
+          // Cargamos paros inmediatamente después
+          if (response.result.id_maquina) {
+            const resParos = await ApiService.getParosByMaquina(response.result.id_maquina);
+            setParos(Array.isArray(resParos?.result) ? resParos.result : []);
+          }
         }
+      } catch (error) {
+        console.error("Fallo carga inicial:", error);
+        isInitialLoad.current = false; // Permitir reintento solo si falló
       }
-    } catch (error) {
-      console.error("Fallo carga inicial:", error);
-      isInitialLoad.current = false; // Permitir reintento solo si falló
+    };
+
+    cargarInformacionIncial();
+  }, [claveProduccion]);
+
+  // --- EFECTO 2: CRONÓMETRO (LIMPIO) ---
+  useEffect(() => {
+    let interval;
+
+    if (isParo) {
+
+      if (!localStorage.getItem('paroStart')) {
+        localStorage.setItem('paroStart', Date.now().toString());
+      }
+
+      
+      interval = setInterval(() => {
+        setParoTime((prev) => {
+          const nuevoTiempo = prev + 1;
+          const paroStart = localStorage.getItem('paroStart', nuevoTiempo);
+          const totalSegundos = Math.floor((Date.now() - parseInt(paroStart, 10)) / 1000);
+          setParoTime(totalSegundos);
+          //localStorage.setItem('paroTime', nuevoTiempo);
+          return nuevoTiempo;
+        });
+      }, 1000);
+    } else {
+      // Cuando no hay paro, limpiamos
+      setParoTime(0);
+      localStorage.removeItem('paroStart');
     }
-  };
 
-  cargarInformacionIncial();
-}, [claveProduccion]);
-
-// --- EFECTO 2: CRONÓMETRO (LIMPIO) ---
-useEffect(() => {
-  let interval;
-  
-  if (isParo) {
-    interval = setInterval(() => {
-      setParoTime((prev) => {
-        const nuevoTiempo = prev + 1;
-        localStorage.setItem('paroTime', nuevoTiempo);
-        return nuevoTiempo;
-      });
-    }, 1000);
-  } else {
-    // Cuando no hay paro, limpiamos
-    setParoTime(0);
-    localStorage.removeItem('paroTime');
-  }
-
-  return () => {
-    if (interval) clearInterval(interval);
-  };
-}, [isParo]);
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isParo]);
 
   const [paroTime, setParoTime] = useState(() => {
     const tiempoGuardado = localStorage.getItem('paroTime');
@@ -153,18 +167,18 @@ useEffect(() => {
   };
 
 
- const getParosByMaquina = async (id_maquina) => {
-  if (!id_maquina) return;
-  
-  try {
-    const response = await ApiService.getParosByMaquina(id_maquina);
-    // Forzamos siempre un array para evitar "T.map is not a function"
-    setParos(Array.isArray(response?.result) ? response.result : []);
-  } catch (error) {
-    console.error("Error en paros:", error);
-    setParos([]); // Fallback seguro
+  const getParosByMaquina = async (id_maquina) => {
+    if (!id_maquina) return;
+
+    try {
+      const response = await ApiService.getParosByMaquina(id_maquina);
+      // Forzamos siempre un array para evitar "T.map is not a function"
+      setParos(Array.isArray(response?.result) ? response.result : []);
+    } catch (error) {
+      console.error("Error en paros:", error);
+      setParos([]); // Fallback seguro
+    }
   }
-}
   const iconColors = [
     'text-blue-500',
     'text-amber-500',
@@ -185,6 +199,7 @@ useEffect(() => {
     try {
       const fecha = new Date();
       const hora = obtenerHoraActual();
+      setHoraInicioParo(fecha);
       // console.log(hora);
       const fechaFormateada = fecha.toLocaleDateString('es-ES', {
         day: '2-digit',
@@ -216,6 +231,7 @@ useEffect(() => {
 
       if (!isParo) {
         // Si estamos en producción, iniciamos el paro
+        localStorage.setItem('paroStart', Date.now().toString());
         console.log("Iniciando paro con motivo de paro:", dataParo);
         const result = await ApiService.insertRegistroParo(dataParo);
         iniciarParo(result.result.name);
@@ -293,7 +309,7 @@ useEffect(() => {
     setShowModalConfirmar(true);
     setTipoCierre('FIN_LOTE');
     setTextModal('¿Estas seguro que quieres cerrar el Lote?');
-  } 
+  }
 
 
 
@@ -554,16 +570,16 @@ useEffect(() => {
 
             <div className="p-6 text-center">
               <p className="text-slate-500 mb-2">
-               {textModal}
+                {textModal}
               </p>
 
               <div className="flex gap-3">
                 <button
                   onClick={handleConfirmCloseLote}
                   className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-white bg-gradient-to-r from-purple-500 via-purple-600 to-purple-700 hover:bg-gradient-to-br focus:ring-4 focus:outline-none focus:ring-blue-300 dark:focus:ring-blue-800 font-medium rounded-base text-sm px-4 py-2.5 text-center leading-5"
-                  
+
                 >
-                   <CheckCircle2 className="w-5 h-5" />
+                  <CheckCircle2 className="w-5 h-5" />
                   Cerrar Lote
                 </button>
                 <button
@@ -579,7 +595,7 @@ useEffect(() => {
                   onClick={() => setShowModalConfirmar(false)}
                   className="flex-1 flex items-center justify-center gap-2 px-3 py-3 rounded-xl text-white bg-gradient-to-r from-red-400 via-red-500 to-red-600 hover:bg-gradient-to-br focus:ring-4 focus:outline-none focus:ring-red-300 dark:focus:ring-red-800 font-medium rounded-base text-sm px-4 py-2.5 text-center leading-5"
                 >
-                  <ArrowLeftFromLine  className="w-5 h-5" />
+                  <ArrowLeftFromLine className="w-5 h-5" />
                   Volver
                 </button>
               </div>

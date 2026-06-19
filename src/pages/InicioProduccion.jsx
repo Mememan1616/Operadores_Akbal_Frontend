@@ -21,6 +21,7 @@ export default function InicioProduccion() {
   const { user } = useContext(AuthContext);
   const { claveParo, iniciarParo, terminarParo } = useParo();
   const { claveProduccion, setClaveProduccion } = useProduccion();
+  const [produccion, setProduccion] = useState({});
   const [formData, setFormData] = useState({
     turno: '',
     lote: '',
@@ -40,6 +41,7 @@ export default function InicioProduccion() {
   const [showModal, setShowModal] = useState(!claveProduccion || !claveParo);
   const [seconds, setSeconds] = useState(0);
   const [inicioProduccion, setInicioProduccion] = useState(false);
+  const [showNoRelationModal, setShowNoRelationModal] = useState(false);
   //const [claveParo, setClaveParo] = useState('');
   const navigate = useNavigate();
 
@@ -105,16 +107,6 @@ export default function InicioProduccion() {
         // piezas_buenas: 0,
         // piezas_malas: 0,
         estatus: true,
-        // Dejamos los datos del formulario en null o vacío temporalmente
-        //maquina: "",
-        //id_maquina: "",
-        //produccionxHora: 0,
-        //turno: "",
-        //id_turno: "",
-        //lote: "",
-        //id_lote: "",
-        //producto: "",
-        //id_producto: "",
       }
       //console.log(dataInicial);
       const response = await ApiService.insertProduccion(dataInicial);
@@ -163,6 +155,18 @@ export default function InicioProduccion() {
       setError('Hubo un problema al cargar los turnos disponibles.');
     }
   };
+
+
+  const getProduccionXMaquinaXProducto = async (id_maquina, id_producto) => {
+    try {
+      const response = await ApiService.getProduccion_ProductoXMaquina(id_maquina, id_producto);
+      const resultado = response.result;
+      console.log('produccion por maquina recibida:', resultado);
+      return resultado[0];
+    } catch (err) {
+      setProduccion([]);
+    }
+  }
   const getLotesByMaquina = async (id_maquina) => {
     try {
       const response = await ApiService.getLotesByMaquina(id_maquina);
@@ -246,7 +250,15 @@ export default function InicioProduccion() {
     const maquina = maquinas.find((m) => m.id_maquina === formData.maquina);
     const hora = obtenerHoraActual();
     const turno = turnos.find((t) => t.id_turno === formData.turno);
-    //console.log(maquina, turno, lote, producto);
+
+    const produccionPorMaquinaYProducto = await getProduccionXMaquinaXProducto(maquina.id_maquina, lote.id_producto);
+    if (produccionPorMaquinaYProducto === null || produccionPorMaquinaYProducto === undefined) {
+      setShowNoRelationModal(true);
+      setIsSubmitting(false);
+      return;
+    }
+    console.log("prueba maquina y producto",produccionPorMaquinaYProducto);
+    
     const data = {
       id_maquina: formData.maquina,
       id_turno: formData.turno,
@@ -256,7 +268,7 @@ export default function InicioProduccion() {
       turno: turno.turno,
       lote: lote.lote,
       producto: lote.producto,
-      produccionxHora: maquina.produccionxHora,
+      produccionxHora: produccionPorMaquinaYProducto.velocidad,
       //fecha_produccion: fechaFormateada
     };
     console.log("la data es:", data);
@@ -593,6 +605,33 @@ export default function InicioProduccion() {
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+      {showNoRelationModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all">
+            <div className="bg-amber-500 p-6 text-white flex items-center gap-3">
+              <Settings className="w-6 h-6 text-white" />
+              <h2 className="text-2xl font-bold tracking-wide">Relación no encontrada</h2>
+            </div>
+            <div className="p-8 flex flex-col items-center">
+              <p className="text-slate-700 text-center text-lg font-medium mb-2">
+                Aún no se ha asignado la relación entre la máquina y el producto.
+              </p>
+              <p className="text-slate-500 text-center text-sm">
+                Notifique al supervisor para que configure la velocidad de producción y posterior reinicie la aplicacion.
+              </p>
+            </div>
+            <div className="p-6 pt-0">
+              <button
+                onClick={() => setShowNoRelationModal(false)}
+                className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 text-white font-semibold py-4 px-6 rounded-2xl transition-all hover:shadow-lg active:scale-[0.98]"
+              >
+                <CheckCircle className="w-5 h-5" />
+                Entendido
+              </button>
+            </div>
           </div>
         </div>
       )}

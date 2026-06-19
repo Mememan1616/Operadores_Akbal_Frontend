@@ -270,6 +270,25 @@ const runGoogle = (serverFunction, params) => {
 
                 })
             }
+            if (params.action == 'getProduccion_ProductoXMaquina') {
+                return resolve({
+                    response: 'Hello from getProduccion_ProductoXMaquina!',
+                    status: 200,
+                    result: [
+                        {
+                            tipo:"Automática",
+                            estatus:true,
+                            producto:"Prueba 2",
+                            id_producto:"prueba2",
+                            velocidad:2000.0,
+                            id_maquina:"prueba2"
+                        },
+                   
+                    ]
+
+
+                })
+            }
 
             return reject("Estás en localhost. Haz Build y sube a Apps Script.");
         }
@@ -608,6 +627,22 @@ export const ApiService = {
                 id: claveParo
             });
             console.log('registro paro recibido:', result);
+            return result;
+        } catch (error) {
+            console.error(error)
+        }
+    },
+
+    async getProduccion_ProductoXMaquina(id_maquina, id_producto) {
+        try {
+            //console.log('Solicitando paros...');
+            //console.log(id_maquina);
+            const result = await runGoogle('apiHandler', {
+                action: 'getProduccion_ProductoXMaquina',
+                id_maquina: id_maquina,
+                id_producto: id_producto
+            });
+            console.log('produccion recibida de la maquina y producto:', result);
             return result;
         } catch (error) {
             console.error(error)
