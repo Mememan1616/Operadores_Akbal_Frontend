@@ -15,10 +15,12 @@ import {
   CheckCircle2,
   Calendar,
   Save,
-  Activity
+  Activity,
+  WifiOff,
+  RefreshCw
 } from 'lucide-react';
-import { ApiService } from '../services/ApiService';
-//import { AuthContext } from '../auth/Auth';
+import { ApiService, validarClave } from '../services/ApiService';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
 
 
 
@@ -26,9 +28,10 @@ export default function FinProduccion() {
   const { user } = useContext(AuthContext);
   const { logout } = useContext(AuthContext);
   const { claveProduccion, limpiarProduccion, tipo_cierreContext } = useProduccion();
-  const { claveParo, iniciarParo, terminarParo } = useParo();
+  const { claveParo, iniciarParo, cerrarParo } = useParo();
   const location = useLocation();
   const tipoCierre = location.state;
+  const isOnline = useOnlineStatus();
   // Estados para el formulario
   const [piezasProducidas, setPiezasProducidas] = useState('');
   const [piezasDanadas, setPiezasDanadas] = useState('');
@@ -52,6 +55,8 @@ export default function FinProduccion() {
   const [showModalConteo, setShowModalConteo] = useState(false);
   const [isClosingDespeje, setIsClosingDespeje] = useState(false);
   const [isSavingConteo, setIsSavingConteo] = useState(false);
+  const [cierreError, setCierreError] = useState(null);
+  const [initError, setInitError] = useState(null);
   const navigate = useNavigate();
   const inicializadoRef = useRef(false);
   // Actualizar el reloj cada minuto
@@ -61,15 +66,13 @@ export default function FinProduccion() {
 
     const inicializarCierre = async () => {
       try {
-        // Bloqueamos inmediatamente para que la segunda ejecución de React no pase de aquí
         inicializadoRef.current = true;
+        setInitError(null);
 
         console.log("Iniciando proceso de cierre único...");
 
-        // Ejecutamos el paro de despeje
         await iniciaParo();
 
-        // Configuración de datos de la interfaz
         setOperador(user);
         if (tipoCierre?.tipoCierre === "FIN_TURNO") {
           setcierreLote(false);
@@ -80,17 +83,17 @@ export default function FinProduccion() {
 
       } catch (error) {
         console.error("Error al inicializar el cierre:", error);
-        // Si falló por completo, podrías resetearlo para permitir reintento
-        // inicializadoRef.current = false;
+        setInitError(error.message || 'Error al inicializar el cierre');
+        inicializadoRef.current = false;
       }
     };
 
     inicializarCierre();
 
-    // Reloj (esto puede quedar fuera o dentro, pero mejor fuera del async)
+    // Reloj
     const timer = setInterval(() => setCurrentTime(new Date()), 60000);
     return () => clearInterval(timer);
-  }, []); // Importante: dejar las dependencias vacías []
+  }, []);
   useEffect(() => {
     let interval = null;
 
@@ -190,6 +193,17 @@ export default function FinProduccion() {
     console.log(response);
   }
   const iniciaParo = async () => {
+    const dataRegistro = await ApiService.getProduccion(claveProduccion);
+    setClaveLote(dataRegistro.result.id_lote);
+    setClaveMaquina(dataRegistro.result.id_maquina);
+
+    // Si ya hay un paro activo para esta producción (ej. recarga/remount de la
+    // pantalla de cierre), se reutiliza en vez de crear uno duplicado.
+    if (claveParo) {
+      console.log("Reutilizando paro de despeje activo:", claveParo);
+      return;
+    }
+
     const hora = obtenerHoraActual();
     const fecha = new Date();
     const fechaFormateada = fecha.toLocaleDateString('es-ES', {
@@ -197,10 +211,7 @@ export default function FinProduccion() {
       month: '2-digit',
       year: 'numeric'
     });
-    const dataRegistro = await ApiService.getProduccion(claveProduccion);
-    setClaveLote(dataRegistro.result.id_lote);
     const paro = await getParoProgramado();
-    setClaveMaquina(dataRegistro.result.id_maquina);
     const dataParo = {
       id_turno: dataRegistro.result.id_turno,
       id_producto: dataRegistro.result.id_producto,
@@ -221,23 +232,28 @@ export default function FinProduccion() {
       fecha_produccion: fechaFormateada,
       estatus: true,
       id_semana: dataRegistro.result.id_semana,
-      estatus: true
     };
     console.log(dataParo);
     const response = await ApiService.insertRegistroParo(dataParo);
-    const claveParo = response.result.name;
-    iniciarParo(claveParo);
+    const claveParoNombre = response?.result?.name;
+    if (!claveParoNombre) {
+      throw new Error('El servidor no devolvió una clave para el paro de despeje');
+    }
+    iniciarParo(claveParoNombre);
   }
   const cierre = async () => {
+    // SEGURO: sin clave de paro DESPEJE activa no se procede
+    validarClave(claveParo, 'cerrarParo DESPEJE');
     const hora = obtenerHoraActual();
     const fecha = hoy();
-    const data = { hora_termino: hora, 
-      fecha_termino:fecha,
-    estatus: false };
-    const cierre_produccion = await ApiService.updateProduccion(claveProduccion, data);
-    console.log(cierre_produccion);
-    const cierre_paro = await ApiService.updateRegistroParo(claveParo, data);
-    console.log(cierre_paro);
+    const data = { hora_termino: hora, fecha_termino: fecha, estatus: false };
+
+    // Primero se cierra la producción y luego el paro (con verificación por lectura).
+    // Si la producción falla, el paro no se toca y el reintento es consistente.
+    await ApiService.updateProduccion(claveProduccion, data);
+    await cerrarParo(data);
+
+    console.log('Producción y paro cerrados exitosamente');
   }
 
   const cierreLoteData = async (id_lote, id_maquina) => {
@@ -260,15 +276,16 @@ export default function FinProduccion() {
   const Guardar = async () => {
     try {
       setIsSubmitting(true);
+      setCierreError(null);
       await guardarProduccion();
       setShowModalDespeje(true);
       setShowModalConteo(false);
-
     }
     catch (error) {
       console.error("Error al guardar la producción:", error);
+      setCierreError(error.message || 'Error al guardar. Verifica tu conexión.');
     } finally {
-      setIsSavingConteo(false); // Desactiva el icono de carga
+      setIsSavingConteo(false);
       setIsSubmitting(false);
     }
   }
@@ -289,26 +306,27 @@ export default function FinProduccion() {
   }
 
   const cierraDespeje = async () => {
-    setIsClosingDespeje(true); // Activa el icono de carga
+    setIsClosingDespeje(true);
+    setCierreError(null);
 
     try {
       await cierre();
       setShowModalDespeje(false);
 
       if (tipo_cierreContext === "FIN_LOTE") {
-        setShowModal(true);
         await cierreLoteData(claveLote, claveMaquina);
+        setShowModal(true);
       } else {
         console.log("cierre de turno");
         confirmarCierreTurno();
       }
 
-      terminarParo();
       limpiarProduccion();
     } catch (error) {
       console.error("Error al cerrar el despeje:", error);
+      setCierreError(error.message || 'Error al cerrar. Verifica tu conexión.');
     } finally {
-      setIsClosingDespeje(false); // Desactiva el icono de carga al terminar
+      setIsClosingDespeje(false);
     }
   }
   return (
@@ -328,8 +346,16 @@ export default function FinProduccion() {
               <p className="text-blue-200 text-lg capitalize">{formatearFecha(currentTime)}</p>
             </div>
           </div>
-          <div className="text-right hidden md:block">
-            <div className="text-4xl font-bold tracking-wider">{formatearHora(currentTime)}</div>
+          <div className="flex items-center gap-4">
+            {!isOnline && (
+              <div className="flex items-center gap-2 bg-red-500/20 border border-red-400 text-red-200 px-3 py-1.5 rounded-lg text-sm font-bold">
+                <WifiOff className="w-4 h-4" />
+                Sin conexión
+              </div>
+            )}
+            <div className="text-right hidden md:block">
+              <div className="text-4xl font-bold tracking-wider">{formatearHora(currentTime)}</div>
+            </div>
           </div>
         </div>
 
@@ -450,6 +476,48 @@ export default function FinProduccion() {
           </div>
 
         </form>
+
+        {cierreError && (
+          <div className="mx-6 md:mx-10 mb-6 bg-red-50 border-l-4 border-red-500 p-4 rounded-r-xl flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="w-6 h-6 text-red-500 flex-shrink-0" />
+              <p className="text-red-700 font-medium">{cierreError}</p>
+            </div>
+            <button
+              onClick={() => {
+                setCierreError(null);
+                cierraDespeje();
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700 transition-colors text-sm"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Reintentar
+            </button>
+          </div>
+        )}
+
+        {initError && (
+          <div className="mx-6 md:mx-10 mb-6 bg-red-50 border-l-4 border-red-500 p-6 rounded-r-xl">
+            <div className="flex items-start gap-4">
+              <AlertCircle className="w-8 h-8 text-red-500 flex-shrink-0 mt-1" />
+              <div className="flex-1">
+                <h3 className="text-red-800 font-bold text-lg mb-1">Error al inicializar el cierre</h3>
+                <p className="text-red-600 text-sm mb-4">{initError}</p>
+                <button
+                  onClick={() => {
+                    inicializadoRef.current = false;
+                    setInitError(null);
+                    window.location.reload();
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700 transition-colors text-sm"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Reintentar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
       {showModal && cierreLote && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">

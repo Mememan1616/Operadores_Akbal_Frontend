@@ -9,17 +9,18 @@ import {
   Factory,
   User,
   Cog,
-  Settings
+  Settings,
+  AlertCircle
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ApiService } from '../services/ApiService';
+import { ApiService, validarClave } from '../services/ApiService';
 import { AuthContext } from '../auth/Auth';
 import { useProduccion } from '../context/ProduccionContex';
 import { useParo } from '../context/ParoContext';
-//import {} from '../context/ParoContext';
+import { useOnlineStatus } from '../hooks/useOnlineStatus';
 export default function InicioProduccion() {
   const { user } = useContext(AuthContext);
-  const { claveParo, iniciarParo, terminarParo } = useParo();
+  const { claveParo, iniciarParo, cerrarParo } = useParo();
   const { claveProduccion, setClaveProduccion } = useProduccion();
   const [produccion, setProduccion] = useState({});
   const [formData, setFormData] = useState({
@@ -40,7 +41,15 @@ export default function InicioProduccion() {
   const [maquinas, setMaquinas] = useState([]);
   const [showModal, setShowModal] = useState(!claveProduccion || !claveParo);
   const [seconds, setSeconds] = useState(0);
-  const [inicioProduccion, setInicioProduccion] = useState(false);
+  const [initError, setInitError] = useState('');
+  const [setupParoPendiente, setSetupParoPendiente] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('setup_paro_pendiente')) || null;
+    } catch {
+      return null;
+    }
+  });
+  const isOnline = useOnlineStatus();
   const [showNoRelationModal, setShowNoRelationModal] = useState(false);
   //const [claveParo, setClaveParo] = useState('');
   const navigate = useNavigate();
@@ -71,21 +80,10 @@ export default function InicioProduccion() {
   // Carga inicial de datos y arranque de producción
   const isStarting = useRef(false);
 
-  useEffect(() => {
-    const inicializar = async () => {
-      await getAllTurnos();
-      await getAllMaquinas();
-
-      // SOLO si no hay clave Y no estamos ya intentando iniciar
-      if (!claveProduccion && !isStarting.current) {
-        isStarting.current = true; // Bloqueo inmediato
-        await startProduccion();
-      }
-    };
-    inicializar();
-  }, [claveProduccion]);
-
-  const startProduccion = async () => {
+  const crearProduccionInicial = async () => {
+    if (!user?.id) {
+      throw new Error('Sin operador autenticado. Vuelve a iniciar sesión.');
+    }
     const fecha = new Date();
     const hora = obtenerHoraActual();
     console.log(hora);
@@ -94,43 +92,117 @@ export default function InicioProduccion() {
       month: '2-digit',
       year: 'numeric'
     });
-    if (!inicioProduccion) {
-      const dataInicial = {
-        //id_semana: "test",
-        id_operador: user.id,
-        operador: user.nombre + " " + user.apellidoP + " " + user.apellidoM,
-        hora_inicio: hora,
-        hora_termino: "00:00:00",
-        fecha_produccion: fechaFormateada,
-        // tipo_cierre: "INICIO",
-        // piezas_producidas: 0,
-        // piezas_buenas: 0,
-        // piezas_malas: 0,
-        estatus: true,
-      }
-      //console.log(dataInicial);
-      const response = await ApiService.insertProduccion(dataInicial);
-      //console.log("Respuesta del servidor al iniciar produccion:", response);
-      const clave = response.result.name;
-      setClaveProduccion(clave);
-      console.log("La clave de la produccion es:", clave);
-      setInicioProduccion(true);
-      await new Promise(resolve => setTimeout(resolve, 500));
-      const paroProgramado = await getParoProgramado();
-      const dataParo = {
-        ...dataInicial,
-        id_produccion: clave,
-        id_paro: paroProgramado.id_paro,
-        descripcion_paro: paroProgramado.descripcion,
-        paro: paroProgramado.nombre,
-      }
-      const responseParo = await ApiService.insertRegistroParo(dataParo);
-      console.log("Respuesta del servidor al iniciar paro:", responseParo);
-      const claveParoTemporal = responseParo.result.name;
-      iniciarParo(claveParoTemporal); // Asignar la clave del paro al estado claveParoTemporal;
-      console.log("La clave del paro es:", claveParo);
+    const nombreOperador = [user.nombre, user.apellidoP, user.apellidoM].filter(Boolean).join(' ');
+    const dataInicial = {
+      id_operador: user.id,
+      operador: nombreOperador,
+      hora_inicio: hora,
+      hora_termino: "00:00:00",
+      fecha_produccion: fechaFormateada,
+      estatus: true,
     };
-  }
+    const response = await ApiService.insertProduccion(dataInicial);
+    const clave = response?.result?.name;
+    if (!clave) {
+      throw new Error('El servidor no devolvió una clave para la producción');
+    }
+    return clave;
+  };
+
+  const crearParoSetup = async (clave) => {
+    const paroProgramado = await getParoProgramado();
+    const fecha = new Date();
+    const hora = obtenerHoraActual();
+    const fechaFormateada = fecha.toLocaleDateString('es-ES', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    });
+    const nombreOperador = [user.nombre, user.apellidoP, user.apellidoM].filter(Boolean).join(' ');
+    const dataParo = {
+      id_operador: user.id,
+      operador: nombreOperador,
+      hora_inicio: hora,
+      hora_termino: "00:00:00",
+      fecha_produccion: fechaFormateada,
+      estatus: true,
+      id_produccion: clave,
+      id_paro: paroProgramado.id_paro,
+      descripcion_paro: paroProgramado.descripcion,
+      paro: paroProgramado.nombre,
+    }
+    const responseParo = await ApiService.insertRegistroParo(dataParo);
+    console.log("Respuesta del servidor al iniciar paro:", responseParo);
+    const claveParoTemporal = responseParo?.result?.name;
+    if (!claveParoTemporal) {
+      throw new Error('El servidor no devolvió una clave para el paro SETUP');
+    }
+    return claveParoTemporal;
+  };
+
+  const startProduccion = async () => {
+    const clave = await crearProduccionInicial();
+    setClaveProduccion(clave);
+    console.log("La clave de la produccion es:", clave);
+    // Marca optimista: si algo falla después de esto, el paro SETUP falta
+    localStorage.setItem('setup_paro_pendiente', JSON.stringify(clave));
+    setSetupParoPendiente(clave);
+    try {
+      const claveParoTemporal = await crearParoSetup(clave);
+      iniciarParo(claveParoTemporal);
+      localStorage.removeItem('setup_paro_pendiente');
+      setSetupParoPendiente(null);
+      console.log("La clave del paro SETUP es:", claveParoTemporal);
+    } catch (error) {
+      console.error("Producción creada pero falló el paro SETUP:", error);
+      throw new Error('La producción se creó, pero no se pudo registrar el paro SETUP. Reintenta.');
+    }
+  };
+
+  const iniciarOContinuar = async () => {
+    if (isStarting.current) return;
+    isStarting.current = true;
+    setInitError('');
+    try {
+      if (!user?.id) {
+        throw new Error('Sin operador autenticado. Vuelve a iniciar sesión.');
+      }
+      await getAllTurnos();
+      await getAllMaquinas();
+
+      if (claveParo) {
+        // Ya hay paro activo: limpiamos cualquier marca pendiente obsoleta
+        localStorage.removeItem('setup_paro_pendiente');
+        setSetupParoPendiente(null);
+      } else if (claveProduccion && setupParoPendiente === claveProduccion) {
+        // Reparación: producción activa sin paro SETUP (fallo previo)
+        const claveParoTemporal = await crearParoSetup(claveProduccion);
+        iniciarParo(claveParoTemporal);
+        localStorage.removeItem('setup_paro_pendiente');
+        setSetupParoPendiente(null);
+        console.log("Paro SETUP re-creado para la producción:", claveProduccion);
+      } else if (!claveProduccion) {
+        // SOLO si no hay clave Y no estamos ya intentando iniciar
+        await startProduccion();
+      }
+    } catch (error) {
+      console.error("Error al iniciar producción:", error);
+      setInitError(error?.message || 'No se pudo iniciar la producción. Verifica tu conexión e intenta de nuevo.');
+    } finally {
+      isStarting.current = false;
+    }
+  };
+
+  useEffect(() => {
+    iniciarOContinuar();
+  }, [claveProduccion, claveParo]);
+
+  // Reintento automático al recuperar la conexión
+  useEffect(() => {
+    if (isOnline && initError && !isStarting.current && (!claveProduccion || !claveParo)) {
+      iniciarOContinuar();
+    }
+  }, [isOnline]);
   const getAllTurnos = async () => {
     try {
       const response = await ApiService.getTurnos();
@@ -191,8 +263,11 @@ export default function InicioProduccion() {
   };
   const getParoProgramado = async () => {
     const response = await ApiService.getParoByClaveParo("SETUP");
-    //console.log("paro programado",response);
-    return response.result
+    const resultado = response?.result;
+    if (!resultado || typeof resultado !== 'object' || Array.isArray(resultado) || !resultado.id_paro) {
+      throw new Error('No se encontró el paro SETUP en el catálogo. Contacta al supervisor.');
+    }
+    return resultado;
   }
   const handleChange = (e) => {
 
@@ -242,55 +317,68 @@ export default function InicioProduccion() {
       setError('Por favor, completa todos los campos antes de iniciar la producción.');
       return;
     }
+    if (!claveParo) {
+      setError('No hay un paro SETUP activo. Reintenta o reinicia la aplicación.');
+      return;
+    }
+    const lote = lotes.find((l) => l.id_lote === formData.lote);
+    const maquina = maquinas.find((m) => m.id_maquina === formData.maquina);
+    const turno = turnos.find((t) => t.id_turno === formData.turno);
+    const hora = obtenerHoraActual();
+    if (!lote || !maquina || !turno) {
+      setError('Los datos seleccionados no son válidos. Recarga la página e intenta de nuevo.');
+      return;
+    }
     setIsSubmitting(true);
     console.log(maquinas);
     console.log(formData.maquina)
-    // const producto = productos.find((p) => p.id_producto === formData.producto);
-    const lote = lotes.find((l) => l.id_lote === formData.lote);
-    const maquina = maquinas.find((m) => m.id_maquina === formData.maquina);
-    const hora = obtenerHoraActual();
-    const turno = turnos.find((t) => t.id_turno === formData.turno);
 
-    const produccionPorMaquinaYProducto = await getProduccionXMaquinaXProducto(maquina.id_maquina, lote.id_producto);
-    if (produccionPorMaquinaYProducto === null || produccionPorMaquinaYProducto === undefined) {
-      setShowNoRelationModal(true);
+    try {
+      const produccionPorMaquinaYProducto = await getProduccionXMaquinaXProducto(maquina.id_maquina, lote.id_producto);
+      if (produccionPorMaquinaYProducto === null || produccionPorMaquinaYProducto === undefined) {
+        setShowNoRelationModal(true);
+        return;
+      }
+      console.log("prueba maquina y producto", produccionPorMaquinaYProducto);
+
+      // SEGURO: sin clave de paro SETUP activa no se procede
+      validarClave(claveParo, 'cerrarParo SETUP');
+
+      const data = {
+        id_maquina: formData.maquina,
+        id_turno: formData.turno,
+        id_lote: formData.lote,
+        id_producto: lote.id_producto,
+        maquina: maquina.maquina,
+        turno: turno.turno,
+        lote: lote.lote,
+        producto: lote.producto,
+        produccionxHora: produccionPorMaquinaYProducto.velocidad,
+      };
+      console.log("la data es:", data);
+      const result = await ApiService.updateProduccion(claveProduccion, data);
+      console.log("la clave para update es:", claveProduccion);
+      console.log(result);
+
+      const dataParo = {
+        ...data,
+        id_produccion: claveProduccion,
+        hora_termino: hora,
+        estatus: false
+      }
+
+      await cerrarParo(dataParo);
+      console.log("Paro SETUP cerrado exitosamente:", claveParo);
+
+      setTimeout(() => {
+        navigate('/operadores');
+      }, 1500);
+    } catch (error) {
+      console.error("Error al iniciar producción:", error);
+      setError('No se pudo iniciar la producción. Verifica tu conexión e intenta de nuevo.');
+    } finally {
       setIsSubmitting(false);
-      return;
     }
-    console.log("prueba maquina y producto",produccionPorMaquinaYProducto);
-    
-    const data = {
-      id_maquina: formData.maquina,
-      id_turno: formData.turno,
-      id_lote: formData.lote,
-      id_producto: lote.id_producto,
-      maquina: maquina.maquina,
-      turno: turno.turno,
-      lote: lote.lote,
-      producto: lote.producto,
-      produccionxHora: produccionPorMaquinaYProducto.velocidad,
-      //fecha_produccion: fechaFormateada
-    };
-    console.log("la data es:", data);
-    // Simular una llamada a la API
-    const result = await ApiService.updateProduccion(claveProduccion, data);
-    console.log("la clave para update es:", claveProduccion);
-    console.log(result);
-    const dataParo = {
-      ...data,
-      id_produccion: claveProduccion,
-      hora_termino: hora,
-    }
-    const responseParo = await ApiService.updateRegistroParo(claveParo, dataParo);
-    //console.log("Respuesta del servidor al iniciar paro:", responseParo);
-    // console.log("La clave del paro es:", claveParo);
-    console.log("La clave del paro es:", claveParo);
-    terminarParo();
-    setTimeout(() => {
-      navigate('/operadores');
-      setIsSubmitting(false);
-      //setIsStarted(true);
-    }, 1500);
 
   };
   const handleReset = () => {
@@ -580,30 +668,53 @@ export default function InicioProduccion() {
               <h2 className="text-2xl font-bold tracking-wide">Setup</h2>
             </div>
 
-            {/* Cuerpo del Modal: Cronómetro */}
-            <div className="p-8 flex flex-col items-center">
-              <p className="text-slate-500 mb-6 text-center text-sm">
-                El tiempo está corriendo. Revisa tus configuraciones y presiona terminar cuando estés listo.
-              </p>
-
-              {/* Visualización del Cronómetro */}
-              <div className="flex items-center justify-center gap-6 mb-2">
-                <span className="text-6xl font-black text-slate-800 text-center tabular-nums tracking-tighter">
-                  {formatTime(seconds)}
-                </span>
+            {/* Cuerpo del Modal: Error o Cronómetro */}
+            {initError ? (
+              <div className="p-8 flex flex-col items-center">
+                <AlertCircle className="w-10 h-10 text-red-500 mb-3" />
+                <p className="text-red-700 text-center text-sm font-medium mb-4">{initError}</p>
+                <button
+                  onClick={() => iniciarOContinuar()}
+                  disabled={isStarting.current}
+                  className="w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-semibold py-4 px-6 rounded-2xl transition-all hover:shadow-lg active:scale-[0.98]"
+                >
+                  {isStarting.current ? (
+                    <div className="animate-spin rounded-full h-5 w-5 border-4 border-white border-t-transparent" />
+                  ) : (
+                    <>
+                      <CheckCircle className="w-5 h-5" />
+                      Reintentar
+                    </>
+                  )}
+                </button>
               </div>
-            </div>
+            ) : (
+              <>
+                <div className="p-8 flex flex-col items-center">
+                  <p className="text-slate-500 mb-6 text-center text-sm">
+                    El tiempo está corriendo. Revisa tus configuraciones y presiona terminar cuando estés listo.
+                  </p>
 
-            {/* Pie del Modal: Botón para terminar */}
-            <div className="p-6 pt-0">
-              <button
-                onClick={() => setShowModal(false)}
-                className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-4 px-6 rounded-2xl transition-all hover:shadow-lg active:scale-[0.98]"
-              >
-                <CheckCircle className="w-5 h-5" />
-                Terminar Setup
-              </button>
-            </div>
+                  {/* Visualización del Cronómetro */}
+                  <div className="flex items-center justify-center gap-6 mb-2">
+                    <span className="text-6xl font-black text-slate-800 text-center tabular-nums tracking-tighter">
+                      {formatTime(seconds)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Pie del Modal: Botón para terminar */}
+                <div className="p-6 pt-0">
+                  <button
+                    onClick={() => setShowModal(false)}
+                    className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-4 px-6 rounded-2xl transition-all hover:shadow-lg active:scale-[0.98]"
+                  >
+                    <CheckCircle className="w-5 h-5" />
+                    Terminar Setup
+                  </button>
+                </div>
+              </>
+            )}
 
           </div>
         </div>

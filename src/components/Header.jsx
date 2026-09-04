@@ -1,17 +1,17 @@
-import React, { useState, useEffect, useContext, useNavigate, createContext } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
+import { useLocation } from 'react-router-dom';
 import { AuthContext } from '../auth/Auth';
 import { ApiService } from '../services/ApiService';
 import { useProduccion } from '../context/ProduccionContex';
-import {
-  LogOut // 1. Importamos el ícono LogOut
-} from 'lucide-react';
 
 export default function Header() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const { logout } = useContext(AuthContext);
   const { claveProduccion } = useProduccion();
+  const location = useLocation();
   const [lote, setLote] = useState(null);
   const [hora_inicio, setHoraInicio] = useState(null);
+  const [piezasBuenasAnteriores, setPiezasBuenasAnteriores] = useState(0);
 
 
   const handleLogout = () => {
@@ -28,15 +28,13 @@ export default function Header() {
       console.error('Error al cerrar sesión:', error);
     }
   };
-  
+
   useEffect(() => {
     getProduccion();
-    console.log('Actualizacion del Header')
-    console.log('claveProduccion:', claveProduccion);
 
-  },[claveProduccion]);
+  }, [claveProduccion, location.pathname]);
 
- const getProduccion = async () => {
+  const getProduccion = async () => {
     try {
       if (!claveProduccion) {
         setLote(null); // Limpiar si no hay clave
@@ -48,17 +46,50 @@ export default function Header() {
       // 2. IMPORTANTE: Guardar el dato en el estado
       // Asumiendo que el objeto result tiene una propiedad llamada 'lote' o similar
       //const result = response.result
-      if (response && response.result.lote) {
-        setLote(response.result.lote);
-        setHoraInicio(response.result.hora_inicio);
+      if (response && response.result) {
+        setLote(response.result.lote || null);
+        setHoraInicio(response.result.hora_inicio || null);
+
+        if (response.result.id_lote && response.result.id_maquina) {
+          const total = await getProduccionActiveByLoteMaquina(
+            response.result.id_lote,
+            response.result.id_maquina
+          );
+          setPiezasBuenasAnteriores(total);
+        }
       } else {
         setLote(null);
+        setHoraInicio(null);
+        setPiezasBuenasAnteriores(0);
       }
     } catch (error) {
       console.error('Error al obtener producción:', error);
       setLote(null);
     }
   };
+
+  const getProduccionActiveByLoteMaquina = async (id_lote, id_maquina) => {
+    const response = await ApiService.getProduccionActiveByLoteMaquina(id_lote, id_maquina);
+    console.log('produccion recibida de la maquina y lote:', response);
+    
+    const resultado = response.result;
+    if (!Array.isArray(resultado) || resultado.length === 0) {
+      console.log('No se encontraron registros para sumar.');
+      return 0;
+    }
+
+    // 2. Sumar directamente las piezas_buenas recorriendo el arreglo
+    const total_piezas_buenas = resultado.reduce((acumulador, registro) => {
+      // Convertimos a Number por si viene como flotante/string (ej: 0.0)
+      const piezas = Number(registro.piezas_buenas) || 0;
+      return acumulador + piezas;
+    }, 0);
+
+    console.log('Total de piezas buenas acumuladas:', total_piezas_buenas);
+
+    // 3. Retornar el total sumado
+    return total_piezas_buenas;
+  }
 
   return (
     <header className="sticky top-0 z-20 bg-white border-b border-slate-200 px-4 md:px-8 py-4 flex items-center justify-between transition-colors duration-300 shadow-sm">
@@ -86,17 +117,21 @@ export default function Header() {
       {/* Acciones: Tema y Cerrar Sesión */}
       <div className="flex items-center gap-3 md:gap-6">
         <h2 className="text-lg md:text-2xl font-bold ">
-            Producción ID: {claveProduccion ? claveProduccion : <span className="text-slate-400 italic">Sin asignar</span>}
-          </h2> 
+          Producción ID: {claveProduccion ? claveProduccion : <span className="text-slate-400 italic">Sin asignar</span>}
+        </h2>
         <div className="w-px h-8 bg-slate-300 hidden md:block"></div>
         <h2 className="text-lg md:text-2xl font-bold text-blue-700">
-            Lote: {lote ? lote : <span className="text-slate-400 italic">Sin asignar</span>}
-          </h2> 
+          Lote: {lote ? lote : <span className="text-slate-400 italic">Sin asignar</span>}
+        </h2>
         <div className="w-px h-8 bg-slate-300 hidden md:block"></div>
 
         <h2 className="text-lg md:text-2xl font-bold text-blue-700">
-            Hora Inicio: {hora_inicio ? hora_inicio : <span className="text-slate-400 italic">Sin asignar</span>}
-          </h2>
+          Hora Inicio: {hora_inicio ? hora_inicio : <span className="text-slate-400 italic">Sin asignar</span>}
+        </h2>
+        <div className="w-px h-8 bg-slate-300 hidden md:block"></div>
+        <h2 className="text-lg md:text-2xl font-bold text-green-700">
+          Piezas buenas anteriores: {piezasBuenasAnteriores}
+        </h2>
 
         {/* Botón Cerrar Sesión 
         <button

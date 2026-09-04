@@ -46,7 +46,7 @@ const iconMap = {
 
 export default function Operadores() {
   const { claveProduccion, tipo_cierreContext, setTipoCierreContext } = useProduccion();
-  const { claveParo, iniciarParo, terminarParo } = useParo();
+  const { claveParo, iniciarParo, cerrarParo } = useParo();
   const [dataParo, setDataParo] = useState({});
   const datosCorreo = useContext(EnviarCorreoxHora);
   //const [paroTime, setParoTime] = useState(0);
@@ -79,20 +79,21 @@ export default function Operadores() {
   // Efecto para manejar el cronómetro cuando isParo es true
   // --- EFECTO 1: CARGA DE DATOS (UNIFICADO Y PROTEGIDO) ---
   useEffect(() => {
-    // Solo ejecutamos si hay clave y no hemos cargado ya
-    if (!claveProduccion || isInitialLoad.current) return;
-
+   
     const cargarInformacionIncial = async () => {
       isInitialLoad.current = true; // Bloqueo inmediato
       try {
         const response = await ApiService.getProduccion(claveProduccion);
+        console.log('Produccion obtenida desde Operadores:', response);
         if (response && response.result) {
           setDataRegistro(response);
-          setMaquina(response.result.maquina);
+          setMaquina(response.result.maquina || '');
 
           // Cargamos paros inmediatamente después
           if (response.result.id_maquina) {
+            console.log("Cargando paros...");
             const resParos = await ApiService.getParosByMaquina(response.result.id_maquina);
+            console.log("Paros cargados:", resParos);
             setParos(Array.isArray(resParos?.result) ? resParos.result : []);
           }
         }
@@ -106,28 +107,20 @@ export default function Operadores() {
   }, [claveProduccion]);
 
   // --- EFECTO 2: CRONÓMETRO (LIMPIO) ---
+  const [paroTime, setParoTime] = useState(0);
+
   useEffect(() => {
     let interval;
 
     if (isParo) {
-
-      if (!localStorage.getItem('paroStart')) {
-        localStorage.setItem('paroStart', Date.now().toString());
-      }
-
-      
       interval = setInterval(() => {
-        setParoTime((prev) => {
-          const nuevoTiempo = prev + 1;
-          const paroStart = localStorage.getItem('paroStart', nuevoTiempo);
-          const totalSegundos = Math.floor((Date.now() - parseInt(paroStart, 10)) / 1000);
+        const stored = localStorage.getItem('paroStart');
+        if (stored) {
+          const totalSegundos = Math.floor((Date.now() - parseInt(stored, 10)) / 1000);
           setParoTime(totalSegundos);
-          //localStorage.setItem('paroTime', nuevoTiempo);
-          return nuevoTiempo;
-        });
+        }
       }, 1000);
     } else {
-      // Cuando no hay paro, limpiamos
       setParoTime(0);
       localStorage.removeItem('paroStart');
     }
@@ -136,12 +129,6 @@ export default function Operadores() {
       if (interval) clearInterval(interval);
     };
   }, [isParo]);
-
-  const [paroTime, setParoTime] = useState(() => {
-    const tiempoGuardado = localStorage.getItem('paroTime');
-    // Si hay un tiempo guardado, lo convierte a número. Si no, empieza en 0.
-    return tiempoGuardado ? parseInt(tiempoGuardado, 10) : 0;
-  });
 
   const obtenerHoraActual = () => {
     const ahora = new Date();
@@ -216,7 +203,7 @@ export default function Operadores() {
         id_lote: dataRegistro.result.id_lote,
         id_maquina: dataRegistro.result.id_maquina,
         id_operador: user.id,
-        nombre_operador: user.nombre + " " + user.apellidoP + " " + user.apellidoM,
+        operador: user.nombre + " " + user.apellidoP + " " + user.apellidoM,
         turno: dataRegistro.result.turno,
         lote: dataRegistro.result.lote,
         maquina: dataRegistro.result.maquina,
@@ -226,7 +213,6 @@ export default function Operadores() {
         fecha_produccion: fechaFormateada,
         estatus: true,
         id_semana: dataRegistro.result.id_semana,
-        estatus: true
       };
 
       if (!isParo) {
@@ -234,8 +220,11 @@ export default function Operadores() {
         localStorage.setItem('paroStart', Date.now().toString());
         console.log("Iniciando paro con motivo de paro:", dataParo);
         const result = await ApiService.insertRegistroParo(dataParo);
-        iniciarParo(result.result.name);
-        //setIsParo(true);
+        const nombreClave = result?.result?.name;
+        if (!nombreClave) {
+          throw new Error('El servidor no devolvió una clave para el nuevo paro');
+        }
+        iniciarParo(nombreClave);
         setSelectedParo(null);
       } else {
         if (selectedParo) {
@@ -248,19 +237,31 @@ export default function Operadores() {
           } else {
             descripcion_paro = selectedParo.descripcion
           }
-          console.log("descripcion_paro", descripcion_paro);
-          console.log("descripcion manual", descripcionManual);
           const dataFinParo = {
-
             id_paro: selectedParo.id_paro,
             paro: selectedParo.nombre,
             descripcion_paro: descripcion_paro,
-            hora_termino: hora
+            hora_termino: hora,
+            fecha_termino: fechaFormateada,
+            estatus: false
           }
           console.log("fin paro", dataFinParo);
-          const result = await ApiService.updateRegistroParo(claveParo, dataFinParo);
-          console.log(result);
-          terminarParo();
+
+          if (!claveParo) {
+            console.error('No hay clave de paro activo para cerrar');
+            alert('Error interno: no se encontró el paro activo. Recarga la app.');
+            return;
+          }
+
+          try {
+            await cerrarParo(dataFinParo);
+            console.log("Paro cerrado exitosamente");
+          } catch (error) {
+            console.error("Error al cerrar paro:", error);
+            alert("No se pudo cerrar el paro. Verifica tu conexión e intenta de nuevo.");
+            return;
+          }
+
           setSelectedParo(null);
           // setIsParo(false);
         } else {      // Si ya hay un paro, le avisamos que debe seleccionar un motivo abajo

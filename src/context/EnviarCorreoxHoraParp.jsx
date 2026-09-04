@@ -50,7 +50,7 @@ export const EnviarCorreoxHoraProvider = ({ children }) => {
             console.log("Registro paro:", registroParo);
             console.log("Hora de inicio del paro:", registroParo.hora_inicio);
             // const inicio = new Date(registroParo.hora_inicio);
-            const unaHora = 60 * 60 * 1000;
+            const unaHora = 2 * 60 * 60 * 1000;
             // 1. Separamos el día, mes y año que vienen como '22/05/2026'
             const [dia, mes, anio] = registroParo.fecha_produccion.split('/');
 
@@ -80,7 +80,7 @@ export const EnviarCorreoxHoraProvider = ({ children }) => {
                     await enviarReporteParo({
                         operador: registroParo.nombre_operador || "No asignado",
                         horas: ((ahora - inicio) / unaHora).toFixed(1),
-                        id_produccion: claveParo, // Ya que claveParo es el ID/Clave en sí
+                        id_produccion: registroParo.id_produccion || claveParo,
                         maquina: registroParo.maquina,
                         turno: registroParo.turno,
                         lote: registroParo.lote,

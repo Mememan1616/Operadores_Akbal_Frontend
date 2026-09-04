@@ -1,6 +1,7 @@
 // servicios.js
+import { ApiService } from '../services/ApiService';
 export const enviarReporteParo = async (datosReporte) => {
-  const WEB_APP_URL = "https://script.google.com/macros/s/AKfycby5-bU7NMQP9i1FZ3MU8cFb_VEynE-J4J9-JNwzpAuDvxbvKZcfbawmzM4_8lPH7Lpu/exec";
+ /* const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyvkQ_dCFS277PvRvKFtyRNxW0ngm2z4F37ne5f4qUu81HW5-u2tVpYPbA9hSlXckwN/exec";
   try {
     const response = await fetch(WEB_APP_URL, {
       method: "POST",
@@ -13,5 +14,7 @@ export const enviarReporteParo = async (datosReporte) => {
   } catch (error) {
     console.error("Error en la API:", error);
     throw error;
-  }
+  }*/
+const enviarCorreo = await ApiService.setCorreo(datosReporte);
+return enviarCorreo;
 };

@@ -2,6 +2,12 @@ const runGoogle = (serverFunction, params) => {
     return new Promise((resolve, reject) => {
         console.log(`Llamando a ${serverFunction} con params:`, params);
 
+        // 0. BLOQUEO SIN CONEXIÓN: Sin internet no se permite ninguna petición
+        if (!navigator.onLine) {
+            reject(new Error('Sin conexión a internet. Reconéctate para continuar.'));
+            return;
+        }
+
         // 1. Detección de entorno local (Desarrollo)
         if (typeof google === 'undefined' || !google.script) {
             console.warn(`[DEV] Llamada simulada a backend: ${serverFunction}`);
@@ -253,7 +259,8 @@ const runGoogle = (serverFunction, params) => {
                     result: {
                         fecha_produccion: "22/05/2026",
                         hora_inicio: "09:00:00",
-                        hora_termino: "00:00:00",
+                        hora_termino: "10:00:00",
+                        estatus: false,
                         id_operador: "-OqfEBbZtZ1XAR3FuUxO",
                         id_paro: "paro6",
                         id_produccion: "-OtEcYkZtxtRZJLxEj5E",
@@ -289,6 +296,54 @@ const runGoogle = (serverFunction, params) => {
 
                 })
             }
+            if (params.action === 'getProduccionActiveByLoteMaquina') {
+                return resolve({
+                    response: 'Hello from getProduccionActiveByLoteMaquina!',
+                    status: 200,
+                    result: [
+                        {
+                            hora_termino: "00:00:00",
+                            id_operador: "1.0",
+                            hora_inicio: "14:50:15",
+                            maquina: "maquina1",
+                            lote: "lote1",
+                            turno: "turno1",
+                            piezas_malas: 0.0,
+                            estatus: true,
+                            id_producto: "producto1id",
+                            producto: "producto1",
+                            id_maquina: "maquina1id",
+                            fecha_produccion: "25/03/2026",
+                            tipo_cierre: "INICIO",
+                            id_turno: "turno1",
+                            piezas_buenas: 0.0,
+                            piezas_producidas: 0.0,
+                            id_lote: "lote1",
+                            id_semana: "semana1"
+                        },
+                        {
+                            hora_termino: "00:00:00",
+                            id_operador: "2.0",
+                            hora_inicio: "06:30:00",
+                            maquina: "maquina2",
+                            lote: "lote2",
+                            turno: "turno2",
+                            piezas_malas: 5.0,
+                            estatus: true,
+                            id_producto: "producto2id",
+                            producto: "producto2",
+                            id_maquina: "maquina2id",
+                            fecha_produccion: "25/03/2026",
+                            tipo_cierre: "INICIO",
+                            id_turno: "turno2",
+                            piezas_buenas: 95.0,
+                            piezas_producidas: 100.0,
+                            id_lote: "lote2",
+                            id_semana: "semana1"
+                        }
+                    ]
+                })
+            }
 
             return reject("Estás en localhost. Haz Build y sube a Apps Script.");
         }
@@ -303,11 +358,11 @@ const runGoogle = (serverFunction, params) => {
 
         console.log('google.script.run disponible, iniciando llamada...');
 
-        // 3. Crear timeout de seguridad (90 segundos)
+        // 3. Crear timeout de seguridad (15 segundos)
         const timeout = setTimeout(() => {
-            console.error('Timeout: La llamada tardó más de 30 segundos');
+            console.error('Timeout: La llamada tardó más de 15 segundos');
             reject(new Error('Timeout: El servidor tardó demasiado en responder'));
-        }, 90000);
+        }, 15000);
 
         // 4. Llamada Real a Google Apps Script
         google.script.run
@@ -373,6 +428,11 @@ const runGoogle = (serverFunction, params) => {
 
     });
 };
+export const validarClave = (clave, accion) => {
+    if (!clave || typeof clave !== 'string' || clave === 'null' || clave === 'undefined') {
+        throw new Error(`${accion}: clave inválida (${clave})`);
+    }
+};
 export const ApiService = {
     // --- Prueba ---
     async testAppscript() {
@@ -403,81 +463,64 @@ export const ApiService = {
     },
     async getParos() {
         try {
-            // console.log('Solicitando paros...');
             const result = await runGoogle('apiHandler', {
                 action: 'getParos'
             });
-            //console.log('Usuario recibido:', result);
             return result;
         } catch (error) {
-            console.error(error)
+            console.error('Error en getParos:', error);
+            throw error;
         }
     },
     async getLotes() {
         try {
-            //console.log('Solicitando lotes...');
             const result = await runGoogle('apiHandler', {
                 action: 'getLotes'
             });
-            //console.log('Usuario recibido:', result);
             return result;
         } catch (error) {
-            console.error(error)
+            console.error('Error en getLotes:', error);
+            throw error;
         }
     },
     async getProductos() {
         try {
-            // console.log('Solicitando paros...');
             const result = await runGoogle('apiHandler', {
                 action: 'getProductos'
             });
-            // console.log('Usuario recibido:', result);
             return result;
         } catch (error) {
-            console.error(error)
+            console.error('Error en getProductos:', error);
+            throw error;
         }
     },
     async getTurnos() {
         try {
-            //console.log('Solicitando paros...');
-            const result = await runGoogle('apiHandler', {
-                action: 'getHorarios'
-            });
-            //console.log('Usuario recibido:', result);
-            return result;
-        } catch (error) {
-            console.error(error)
-        }
-    },
-    async getTurnos() {
-        try {
-            // console.log('Solicitando paros...');
             const result = await runGoogle('apiHandler', {
                 action: 'getTurnos'
             });
-            // console.log('Usuario recibido:', result);
             return result;
         } catch (error) {
-            console.error(error)
+            console.error('Error en getTurnos:', error);
+            throw error;
         }
     },
     async getMaquinas() {
         try {
-            //console.log('Solicitando paros...');
             const result = await runGoogle('apiHandler', {
                 action: 'getMaquinas'
             });
-            //console.log('Usuario recibido:', result);
             return result;
         } catch (error) {
-            console.error(error)
+            console.error('Error en getMaquinas:', error);
+            throw error;
         }
     },
 
     async insertRegistroParo(data) {
         try {
+            if (data?.id_produccion) validarClave(data.id_produccion, 'insertRegistroParo');
             console.log('insertRegistroParo...');
-            //console.log(data);
             const result = await runGoogle('apiHandler', {
                 action: 'insertRegistroParo',
                 data: data
@@ -485,7 +528,8 @@ export const ApiService = {
             console.log('Clave recibida:', result);
             return result;
         } catch (error) {
-            console.error(error)
+            console.error('Error en insertRegistroParo:', error);
+            throw error;
         }
     },
     async insertProduccion(data) {
@@ -499,14 +543,13 @@ export const ApiService = {
             console.log('Clave recibida:', result);
             return result;
         } catch (error) {
-            console.error(error)
+            console.error('Error en insertProduccion:', error);
+            throw error;
         }
     },
     async updateProduccion(id, data) {
         try {
-            //console.log('updateProduccion...');
-            //console.log(id);
-            //console.log(data);
+            validarClave(id, 'updateProduccion');
             const result = await runGoogle('apiHandler', {
                 action: 'updateProduccion',
                 id: id,
@@ -515,15 +558,14 @@ export const ApiService = {
             console.log('Clave recibida:', result);
             return result;
         } catch (error) {
-            console.error(error)
+            console.error('Error en updateProduccion:', error);
+            throw error;
         }
 
     },
     async updateRegistroParo(id, data) {
         try {
-            // console.log('Solicitando paros...');
-            // console.log(id);
-            // console.log(data);
+            validarClave(id, 'updateRegistroParo');
             const result = await runGoogle('apiHandler', {
                 action: 'updateRegistroParo',
                 id: id,
@@ -532,14 +574,15 @@ export const ApiService = {
             console.log('Clave recibida:', result);
             return result;
         } catch (error) {
-            console.error(error)
+            console.error('Error en updateRegistroParo:', error);
+            throw error;
         }
 
     },
     async cerrarLote(id_lote, id_maquina) {
         try {
-            // console.log('Solicitando cerrar lote...');
-            // console.log(id);
+            validarClave(id_lote, 'cerrarLote');
+            validarClave(id_maquina, 'cerrarLote');
             const result = await runGoogle('apiHandler', {
                 action: 'deleteMaquinaFromLote',
                 id_lote: id_lote,
@@ -548,13 +591,13 @@ export const ApiService = {
             console.log('Clave recibida:', result);
             return result;
         } catch (error) {
-            console.error(error)
+            console.error('Error en cerrarLote:', error);
+            throw error;
         }
     },
     async getProduccion(id) {
         try {
-            //console.log('Solicitando paros...');
-            //console.log(id);
+            validarClave(id, 'getProduccion');
             const result = await runGoogle('apiHandler', {
                 action: 'getProduccion',
                 id: id
@@ -562,38 +605,38 @@ export const ApiService = {
             console.log('produccion recibida:', result);
             return result;
         } catch (error) {
-            console.error(error)
+            console.error('Error en getProduccion:', error);
+            throw error;
         }
     },
     async getParosByMaquina(id_maquina) {
         try {
-            //console.log('Solicitando paros...');
-            //console.log(id_maquina);
+            validarClave(id_maquina, 'getParosByMaquina');
             const result = await runGoogle('apiHandler', {
                 action: 'getParosByMaquina',
-                id: id_maquina
+                id_maquina: id_maquina
             });
             console.log('paros recibidos:', result);
             return result;
         } catch (error) {
-            console.error(error)
+            console.error('Error en getParosByMaquina:', error);
+            throw error;
         }
     },
     async getParosProgramados() {
         try {
-            //console.log('Solicitando paros...');
             const result = await runGoogle('apiHandler', {
                 action: 'getParosProgramados'
             });
             console.log('paros recibidos:', result);
             return result;
         } catch (error) {
-            console.error(error)
+            console.error('Error en getParosProgramados:', error);
+            throw error;
         }
     },
     async getParoByClaveParo(clave) {
         try {
-            //console.log('Solicitando paros...');
             const result = await runGoogle('apiHandler', {
                 action: 'getParoByClaveParo',
                 clave: clave
@@ -601,13 +644,13 @@ export const ApiService = {
             console.log('paros recibidos:', result);
             return result;
         } catch (error) {
-            console.error(error)
+            console.error('Error en getParoByClaveParo:', error);
+            throw error;
         }
     },
     async getLotesByMaquina(id_maquina) {
         try {
-            //console.log('Solicitando paros...');
-            //console.log(id_maquina);
+            validarClave(id_maquina, 'getLotesByMaquina');
             const result = await runGoogle('apiHandler', {
                 action: 'getLotesByMaquina',
                 id: id_maquina
@@ -615,13 +658,13 @@ export const ApiService = {
             console.log('lotes recibidos:', result);
             return result;
         } catch (error) {
-            console.error(error)
+            console.error('Error en getLotesByMaquina:', error);
+            throw error;
         }
     },
     async getRegistroParoById(claveParo) {
         try {
-            //console.log('Solicitando paros...');
-            //console.log(id_maquina);
+            validarClave(claveParo, 'getRegistroParoById');
             const result = await runGoogle('apiHandler', {
                 action: 'getRegistroParoById',
                 id: claveParo
@@ -629,14 +672,15 @@ export const ApiService = {
             console.log('registro paro recibido:', result);
             return result;
         } catch (error) {
-            console.error(error)
+            console.error('Error en getRegistroParoById:', error);
+            throw error;
         }
     },
 
     async getProduccion_ProductoXMaquina(id_maquina, id_producto) {
         try {
-            //console.log('Solicitando paros...');
-            //console.log(id_maquina);
+            validarClave(id_maquina, 'getProduccion_ProductoXMaquina');
+            validarClave(id_producto, 'getProduccion_ProductoXMaquina');
             const result = await runGoogle('apiHandler', {
                 action: 'getProduccion_ProductoXMaquina',
                 id_maquina: id_maquina,
@@ -645,8 +689,38 @@ export const ApiService = {
             console.log('produccion recibida de la maquina y producto:', result);
             return result;
         } catch (error) {
-            console.error(error)
+            console.error('Error en getProduccion_ProductoXMaquina:', error);
+            throw error;
         }
     },
+    async getProduccionActiveByLoteMaquina(id_lote, id_maquina) {
+        try {
+            validarClave(id_lote, 'getProduccionActiveByLoteMaquina');
+            validarClave(id_maquina, 'getProduccionActiveByLoteMaquina');
+            const result = await runGoogle('apiHandler', {
+                action: 'getProduccionActiveByLoteMaquina',
+                id_lote: id_lote,
+                id_maquina: id_maquina
+            });
+            console.log('produccion recibida del lote y maquina:', result);
+            return result;
+        } catch (error) {
+            console.error('Error en getProduccionActiveByLoteMaquina:', error);
+            throw error;
+        }
+    },
+    async setCorreo(data){
+        try {
+            const result = await runGoogle('apiHandler', {
+                action: 'setCorreo',
+                data: data
+            });
+            console.log('correo recibido:', result);
+            return result;
+        } catch (error) {
+            console.error('Error en setCorreo:', error);
+            throw error;
+        }
+    }
 
 }
