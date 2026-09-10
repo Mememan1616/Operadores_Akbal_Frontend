@@ -56,7 +56,6 @@ export default function InicioProduccion() {
 
   // Actualizar el reloj cada segundo
   useEffect(() => {
-    console.log("el usuario es:", user);
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
@@ -86,7 +85,6 @@ export default function InicioProduccion() {
     }
     const fecha = new Date();
     const hora = obtenerHoraActual();
-    console.log(hora);
     const fechaFormateada = fecha.toLocaleDateString('es-ES', {
       day: '2-digit',
       month: '2-digit',
@@ -132,7 +130,6 @@ export default function InicioProduccion() {
       paro: paroProgramado.nombre,
     }
     const responseParo = await ApiService.insertRegistroParo(dataParo);
-    console.log("Respuesta del servidor al iniciar paro:", responseParo);
     const claveParoTemporal = responseParo?.result?.name;
     if (!claveParoTemporal) {
       throw new Error('El servidor no devolvió una clave para el paro SETUP');
@@ -143,7 +140,6 @@ export default function InicioProduccion() {
   const startProduccion = async () => {
     const clave = await crearProduccionInicial();
     setClaveProduccion(clave);
-    console.log("La clave de la produccion es:", clave);
     // Marca optimista: si algo falla después de esto, el paro SETUP falta
     localStorage.setItem('setup_paro_pendiente', JSON.stringify(clave));
     setSetupParoPendiente(clave);
@@ -152,7 +148,6 @@ export default function InicioProduccion() {
       iniciarParo(claveParoTemporal);
       localStorage.removeItem('setup_paro_pendiente');
       setSetupParoPendiente(null);
-      console.log("La clave del paro SETUP es:", claveParoTemporal);
     } catch (error) {
       console.error("Producción creada pero falló el paro SETUP:", error);
       throw new Error('La producción se creó, pero no se pudo registrar el paro SETUP. Reintenta.');
@@ -180,7 +175,6 @@ export default function InicioProduccion() {
         iniciarParo(claveParoTemporal);
         localStorage.removeItem('setup_paro_pendiente');
         setSetupParoPendiente(null);
-        console.log("Paro SETUP re-creado para la producción:", claveProduccion);
       } else if (!claveProduccion) {
         // SOLO si no hay clave Y no estamos ya intentando iniciar
         await startProduccion();
@@ -233,7 +227,6 @@ export default function InicioProduccion() {
     try {
       const response = await ApiService.getProduccion_ProductoXMaquina(id_maquina, id_producto);
       const resultado = response.result;
-      console.log('produccion por maquina recibida:', resultado);
       return resultado[0];
     } catch (err) {
       setProduccion([]);
@@ -249,9 +242,7 @@ export default function InicioProduccion() {
   };
   /*const getAllProductos = async () => {
       const response = await ApiService.getProductos();
-      //console.log(response);
       setProductos(response.result);
-      //console.log("Respuesta del servidor:", response);
     }*/
   const getAllMaquinas = async () => {
     try {
@@ -277,21 +268,15 @@ export default function InicioProduccion() {
       // Limpiamos lote y producto porque la máquina cambió
       setFormData(prev => ({ ...prev, lote: '', producto: '' }));
       if (value) {
-        console.log("el lote:", value);
         getLotesByMaquina(value);
       }
 
     }
     if (name === 'lote') {
-      console.log("la data:");
-      console.log(value);
       if (value) {
-        console.log("el lote:", value);
         const lote = lotes.find(lote => lote.id_lote === value);
-        console.log(lote);
         setFormData(prev => ({ ...prev, producto: lote.producto }));
       }
-      console.log(formData);
     }
     if (error) setError('');
   };
@@ -304,7 +289,6 @@ export default function InicioProduccion() {
   const handleStart = async (e) => {
     const fecha = new Date();
     // const hora = obtenerHoraActual();
-    //console.log(hora);
     const fechaFormateada = fecha.toLocaleDateString('es-ES', {
       day: '2-digit',
       month: '2-digit',
@@ -330,8 +314,6 @@ export default function InicioProduccion() {
       return;
     }
     setIsSubmitting(true);
-    console.log(maquinas);
-    console.log(formData.maquina)
 
     try {
       const produccionPorMaquinaYProducto = await getProduccionXMaquinaXProducto(maquina.id_maquina, lote.id_producto);
@@ -339,7 +321,6 @@ export default function InicioProduccion() {
         setShowNoRelationModal(true);
         return;
       }
-      console.log("prueba maquina y producto", produccionPorMaquinaYProducto);
 
       // SEGURO: sin clave de paro SETUP activa no se procede
       validarClave(claveParo, 'cerrarParo SETUP');
@@ -355,10 +336,7 @@ export default function InicioProduccion() {
         producto: lote.producto,
         produccionxHora: produccionPorMaquinaYProducto.velocidad,
       };
-      console.log("la data es:", data);
       const result = await ApiService.updateProduccion(claveProduccion, data);
-      console.log("la clave para update es:", claveProduccion);
-      console.log(result);
 
       const dataParo = {
         ...data,
@@ -368,7 +346,6 @@ export default function InicioProduccion() {
       }
 
       await cerrarParo(dataParo);
-      console.log("Paro SETUP cerrado exitosamente:", claveParo);
 
       setTimeout(() => {
         navigate('/operadores');
@@ -397,8 +374,6 @@ export default function InicioProduccion() {
   };
   const setHorario = (listaDeTurnos) => {
     const horaActual = obtenerHoraActual();
-    console.log("Hora actual:", horaActual);
-    console.log("los turnos son:", listaDeTurnos);
     const horaAMinutos = (horaString) => {
       if (!horaString) return 0;
       // Separamos por los dos puntos ":"
@@ -422,10 +397,7 @@ export default function InicioProduccion() {
       }
     });
     if (turnoDetectado) {
-      console.log("Turno detectado correctamente:", turnoDetectado.turno);
       setFormData((prev) => ({ ...prev, turno: turnoDetectado.id_turno }));
-    } else {
-      console.log("No se encontró ningún turno para la hora:", horaActual);
     }
   }
   // ... dentro de InicioProduccion, antes del return

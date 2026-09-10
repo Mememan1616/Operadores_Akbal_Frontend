@@ -1,32 +1,40 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import { enviarReporteParo } from './CorreoFuncion';
 import { ApiService } from '../services/ApiService';
-import { useParo } from '../context/ParoContext'; // El contexto que tiene la clave
+import { useParo } from '../context/ParoContext';
+import { AuthContext } from '../auth/Auth';
 
 export const EnviarCorreoxHora = createContext(null);
 
 export const EnviarCorreoxHoraProvider = ({ children }) => {
     console.log("hola desde el provider contextto");
     const { claveParo } = useParo();
-    // 1. Corregido el useState y usando minúsculas para seguir buenas prácticas
+    const { user } = useContext(AuthContext);
+
     const [registroParo, setRegistroParo] = useState(null);
-    const [correoEnviado, setCorreoEnviado] = useState(false);
+    const [produccion, setProduccion] = useState(null);
     const [horasReportadas, setHorasReportadas] = useState(0);
+
     // --- EFECTO 1: Traer los datos de la API cuando cambie la clave del paro ---
     useEffect(() => {
-        console.log("hola");
         console.log("Cambiando la clave del paro:", claveParo);
         const obtenerDatosParo = async () => {
             if (!claveParo) {
                 setRegistroParo(null);
-                setCorreoEnviado(false); // Resetear si el paro se termina
+                setProduccion(null);
+                setHorasReportadas(0); // Reiniciar el contador si el paro finaliza
                 return;
             }
 
             try {
                 const datos = await ApiService.getRegistroParoById(claveParo);
-                console.log("Datos del paro cargados de la API:", datos);
+                console.log("Datos obtenidos de la API:", datos);
+                
+                const registro_prod = await ApiService.getProduccion(datos.result.id_produccion);
+                console.log("Producción obtenida de la API:", registro_prod);
+
                 setRegistroParo(datos.result);
+                setProduccion(registro_prod.result);
             } catch (error) {
                 console.error("Error al consultar el registro del paro mediante la API:", error);
             }
@@ -35,78 +43,72 @@ export const EnviarCorreoxHoraProvider = ({ children }) => {
         obtenerDatosParo();
     }, [claveParo]);
 
-
-    // --- EFECTO 2: Controlar el temporizador de 1 hora ---
+    // --- EFECTO 2: Controlar el temporizador recurrente cada 2 horas ---
     useEffect(() => {
-        // No hacer nada si: no hay clave, no han llegado los datos de la API, o el correo ya se envió
-        console.log("Correo enviado:", correoEnviado);
-        console.log("Clave paro:", claveParo);
-        console.log("Registro paro:", registroParo);
-        if (!claveParo || !registroParo || correoEnviado) return;
+        // No hacer nada si faltan datos esenciales
+        if (!claveParo || !registroParo || !produccion) return;
 
         const revisarTiempo = async () => {
             const ahora = new Date();
-            console.log("Hora actual:", ahora);
-            console.log("Registro paro:", registroParo);
-            console.log("Hora de inicio del paro:", registroParo.hora_inicio);
-            // const inicio = new Date(registroParo.hora_inicio);
-            const unaHora = 2 * 60 * 60 * 1000;
-            // 1. Separamos el día, mes y año que vienen como '22/05/2026'
+            
+            // 1. Separar y asegurar formato de dos dígitos para día y mes
             const [dia, mes, anio] = registroParo.fecha_produccion.split('/');
+            const diaPad = dia.padStart(2, '0');
+            const mesPad = mes.padStart(2, '0');
 
-            // 2. Tomamos tu string de hora '13:13:29'
-            const horaCompleta = registroParo.hora_inicio;
-
-            // 3. Fucionamos todo en el formato estándar ISO (YYYY-MM-DDTHH:mm:ss)
-            const formatoISO = `${anio}-${mes}-${dia}T${horaCompleta}`;
-
-            // 4. Ahora sí, creamos el objeto Date real de JavaScript
+            // 2. Fusionar en formato estándar ISO
+            const formatoISO = `${anio}-${mesPad}-${diaPad}T${registroParo.hora_inicio}`;
             const inicio = new Date(formatoISO);
 
-            console.log("Hora de inicio del paro formateada correctamente:", inicio);
-
-            // Validar que la fecha de inicio sea válida
+            // 3. Validar que la fecha sea válida
             if (isNaN(inicio.getTime())) return;
-            console.log("Hora de inicio del paro formateada:", inicio);
-            const diferencia = ahora - inicio;
 
-            console.log("diferencia de horas:", diferencia);
-            
-            if (diferencia >= unaHora) {
+            // 4. Calcular horas transcurridas reales (diferencia ms / ms en 1 hora)
+            const diferenciaMs = ahora - inicio;
+            const horasTranscurridas = diferenciaMs / (1000 * 60 * 60);
+
+            // 5. Determinar la siguiente meta de reporte (2h, 4h, 6h, etc.)
+            const tiempo_reporte = 2;
+            const siguienteMeta = horasReportadas + tiempo_reporte;
+
+            console.log(`Horas transcurridas: ${horasTranscurridas.toFixed(2)}h | Siguiente meta: ${siguienteMeta}h`);
+
+            if (horasTranscurridas >= siguienteMeta) {
                 try {
-                    console.log("¡Alerta de producción! El paro superó 1 hora. Enviando...");
+                    console.log(`¡Alerta! El paro alcanzó/superó las ${siguienteMeta} horas. Enviando reporte...`);
+                    
+                    const operador = user ? `${user.nombre || ''} ${user.apellidoP || ''} ${user.apellidoM || ''}`.trim() : "No asignado";
 
-                    // Enviamos el reporte usando las llaves correctas de tu objeto de la API
                     await enviarReporteParo({
-                        operador: registroParo.nombre_operador || "No asignado",
-                        horas: ((ahora - inicio) / unaHora).toFixed(1),
+                        operador: operador || "No asignado",
+                        horas: horasTranscurridas.toFixed(1),
                         id_produccion: registroParo.id_produccion || claveParo,
-                        maquina: registroParo.maquina,
-                        turno: registroParo.turno,
-                        lote: registroParo.lote,
+                        maquina: produccion.maquina,
+                        turno: produccion.turno,
+                        lote: produccion.lote,
                         paro: registroParo.paro
                     });
 
-                    // Marcamos como enviado para destruir el bucle y evitar spam de correos
-                    setCorreoEnviado(true);
-                    console.log("Correo enviado con éxito desde el Contexto.");
+                    // Actualizamos el hito alcanzado para esperar las siguientes 2 horas
+                    setHorasReportadas(siguienteMeta);
+                    console.log(`Correo enviado con éxito. Próximo aviso a las ${siguienteMeta + 2} horas.`);
                 } catch (error) {
                     console.error("Error al enviar el correo automático:", error);
                 }
             }
         };
 
-        // Ejecutar inmediatamente al tener los datos
+        // Ejecutar revisión inmediata
         revisarTiempo();
 
-        // Configurar revisión cada minuto
+        // Configurar revisión continua cada minuto
         const intervalo = setInterval(revisarTiempo, 60000);
 
         return () => clearInterval(intervalo);
-    }, [claveParo, registroParo, correoEnviado]); // Dependencias sincronizadas
+    }, [claveParo, registroParo, produccion, horasReportadas, user]);
 
     return (
-        <EnviarCorreoxHora.Provider value={{ registroParo, correoEnviado }}>
+        <EnviarCorreoxHora.Provider value={{ registroParo, horasReportadas }}>
             {children}
         </EnviarCorreoxHora.Provider>
     );

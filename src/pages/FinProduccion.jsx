@@ -69,8 +69,6 @@ export default function FinProduccion() {
         inicializadoRef.current = true;
         setInitError(null);
 
-        console.log("Iniciando proceso de cierre único...");
-
         await iniciaParo();
 
         setOperador(user);
@@ -130,15 +128,13 @@ export default function FinProduccion() {
     return `${horas}:${minutos}:${segundos}`; // Ejemplo de salida: "14:30:05"
   };
   const hoy = () => {
-    const fecha = new Date();
     const hora = obtenerHoraActual();
-    console.log(hora);
+    const fecha = new Date();
     const fechaFormateada = fecha.toLocaleDateString('es-ES', {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric'
     });
-    console.log(fechaFormateada);
     return fechaFormateada
   }
 
@@ -188,9 +184,7 @@ export default function FinProduccion() {
       hora_termino: "00:00:00",
       tipo_cierre: tipo_cierreContext,
     };
-    console.log(proudccionData);
     const response = await ApiService.updateProduccion(claveProduccion, proudccionData);
-    console.log(response);
   }
   const iniciaParo = async () => {
     const dataRegistro = await ApiService.getProduccion(claveProduccion);
@@ -200,7 +194,6 @@ export default function FinProduccion() {
     // Si ya hay un paro activo para esta producción (ej. recarga/remount de la
     // pantalla de cierre), se reutiliza en vez de crear uno duplicado.
     if (claveParo) {
-      console.log("Reutilizando paro de despeje activo:", claveParo);
       return;
     }
 
@@ -233,7 +226,6 @@ export default function FinProduccion() {
       estatus: true,
       id_semana: dataRegistro.result.id_semana,
     };
-    console.log(dataParo);
     const response = await ApiService.insertRegistroParo(dataParo);
     const claveParoNombre = response?.result?.name;
     if (!claveParoNombre) {
@@ -252,13 +244,10 @@ export default function FinProduccion() {
     // Si la producción falla, el paro no se toca y el reintento es consistente.
     await ApiService.updateProduccion(claveProduccion, data);
     await cerrarParo(data);
-
-    console.log('Producción y paro cerrados exitosamente');
   }
 
   const cierreLoteData = async (id_lote, id_maquina) => {
-    const response = await ApiService.cerrarLote(id_lote, id_maquina);
-    console.log(response);
+    await ApiService.cerrarLote(id_lote, id_maquina);
   }
 
   /*const submit = async () => {
@@ -291,7 +280,6 @@ export default function FinProduccion() {
   }
   const getParoProgramado = async () => {
     const response = await ApiService.getParoByClaveParo("DESPEJE");
-    //console.log("paro programado",response);
     return response.result
   }
 
@@ -317,7 +305,6 @@ export default function FinProduccion() {
         await cierreLoteData(claveLote, claveMaquina);
         setShowModal(true);
       } else {
-        console.log("cierre de turno");
         confirmarCierreTurno();
       }
 

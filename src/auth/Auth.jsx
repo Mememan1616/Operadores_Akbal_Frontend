@@ -53,8 +53,6 @@ export default function LoginScreen() {
 
     
     const response =await ApiService.login(username);//verificaCredenciales(username);
-    //console.log(response);
-    console.log(response);
       if (response.result.status === 200) {
         login(response.result.user);
         navigate('/inicio-produccion', { replace: true }); 

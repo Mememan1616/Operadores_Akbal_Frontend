@@ -84,16 +84,13 @@ export default function Operadores() {
       isInitialLoad.current = true; // Bloqueo inmediato
       try {
         const response = await ApiService.getProduccion(claveProduccion);
-        console.log('Produccion obtenida desde Operadores:', response);
         if (response && response.result) {
           setDataRegistro(response);
           setMaquina(response.result.maquina || '');
 
           // Cargamos paros inmediatamente después
           if (response.result.id_maquina) {
-            console.log("Cargando paros...");
             const resParos = await ApiService.getParosByMaquina(response.result.id_maquina);
-            console.log("Paros cargados:", resParos);
             setParos(Array.isArray(resParos?.result) ? resParos.result : []);
           }
         }
@@ -187,14 +184,11 @@ export default function Operadores() {
       const fecha = new Date();
       const hora = obtenerHoraActual();
       setHoraInicioParo(fecha);
-      // console.log(hora);
       const fechaFormateada = fecha.toLocaleDateString('es-ES', {
         day: '2-digit',
         month: '2-digit',
         year: 'numeric'
       });
-
-      console.log("data registro:", dataRegistro);
 
       const dataParo = {
         id_turno: dataRegistro.result.id_turno,
@@ -218,7 +212,6 @@ export default function Operadores() {
       if (!isParo) {
         // Si estamos en producción, iniciamos el paro
         localStorage.setItem('paroStart', Date.now().toString());
-        console.log("Iniciando paro con motivo de paro:", dataParo);
         const result = await ApiService.insertRegistroParo(dataParo);
         const nombreClave = result?.result?.name;
         if (!nombreClave) {
@@ -229,8 +222,6 @@ export default function Operadores() {
       } else {
         if (selectedParo) {
           // Si hay un motivo de paro seleccionado, cerramos el modal y reanudamos la producción
-          console.log("Reanudando producción con motivo de paro:", selectedParo);
-          console.log("Tiempo total del paro:", paroTime, "segundos");
           let descripcion_paro;
           if (selectedParo.clave === "OTRO") {
             descripcion_paro = descripcionManual;
@@ -245,7 +236,6 @@ export default function Operadores() {
             fecha_termino: fechaFormateada,
             estatus: false
           }
-          console.log("fin paro", dataFinParo);
 
           if (!claveParo) {
             console.error('No hay clave de paro activo para cerrar');
@@ -255,7 +245,6 @@ export default function Operadores() {
 
           try {
             await cerrarParo(dataFinParo);
-            console.log("Paro cerrado exitosamente");
           } catch (error) {
             console.error("Error al cerrar paro:", error);
             alert("No se pudo cerrar el paro. Verifica tu conexión e intenta de nuevo.");
@@ -291,12 +280,6 @@ export default function Operadores() {
 
   // NUEVA FUNCIÓN: Confirmar el paro en el modal
   const handleConfirmarParo = () => {
-    // Aquí tienes el ID listo para enviarlo a tu base de datos o API
-    console.log("Guardando paro con ID:", selectedParo.id_paro);
-    console.log("Tiempo total del paro:", paroTime, "segundos");
-    // Lógica sugerida para tu API:
-    // await ApiService.guardarRegistroParo({ id: selectedParo.id_paro, duracion: paroTime });
-    // Cerramos modal y reanudamos producción
     setShowModal(false);
 
   };

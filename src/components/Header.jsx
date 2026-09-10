@@ -15,7 +15,6 @@ export default function Header() {
 
 
   const handleLogout = () => {
-    console.log("Cerrando sesión...");
     try {
       // Lógica para cerrar sesión
       //localStorage.removeItem('userData');
@@ -40,9 +39,7 @@ export default function Header() {
         setLote(null); // Limpiar si no hay clave
         return;
       }
-      console.log('Obteniendo Produccion desde el Header...');
       const response = await ApiService.getProduccion(claveProduccion);
-      console.log('Produccion obtenida desde el Header:', response);
       // 2. IMPORTANTE: Guardar el dato en el estado
       // Asumiendo que el objeto result tiene una propiedad llamada 'lote' o similar
       //const result = response.result
@@ -70,11 +67,8 @@ export default function Header() {
 
   const getProduccionActiveByLoteMaquina = async (id_lote, id_maquina) => {
     const response = await ApiService.getProduccionActiveByLoteMaquina(id_lote, id_maquina);
-    console.log('produccion recibida de la maquina y lote:', response);
-    
     const resultado = response.result;
     if (!Array.isArray(resultado) || resultado.length === 0) {
-      console.log('No se encontraron registros para sumar.');
       return 0;
     }
 
@@ -84,8 +78,6 @@ export default function Header() {
       const piezas = Number(registro.piezas_buenas) || 0;
       return acumulador + piezas;
     }, 0);
-
-    console.log('Total de piezas buenas acumuladas:', total_piezas_buenas);
 
     // 3. Retornar el total sumado
     return total_piezas_buenas;

@@ -59,11 +59,9 @@ const Catalogo = () => {
 
   // Función simulada para la navegación
   const handleNavigation = (ruta) => {
-    console.log(`Navegando hacia: /${ruta}`);
   };
 
   const handleLogout = () => {
-    console.log("Cerrando sesión...");
     // Lógica para cerrar sesión
   };
 
