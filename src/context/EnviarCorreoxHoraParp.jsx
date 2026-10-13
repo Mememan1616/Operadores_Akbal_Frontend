@@ -14,6 +14,7 @@ export const EnviarCorreoxHoraProvider = ({ children }) => {
     const [registroParo, setRegistroParo] = useState(null);
     const [produccion, setProduccion] = useState(null);
     const [horasReportadas, setHorasReportadas] = useState(0);
+    const [tiempoSegundos, setTiempoSegundos] = useState(null);
 
     // --- EFECTO 1: Traer los datos de la API cuando cambie la clave del paro ---
     useEffect(() => {
@@ -22,12 +23,17 @@ export const EnviarCorreoxHoraProvider = ({ children }) => {
             if (!claveParo) {
                 setRegistroParo(null);
                 setProduccion(null);
-                setHorasReportadas(0); // Reiniciar el contador si el paro finaliza
+                setHorasReportadas(0);
+                setTiempoSegundos(null);
                 return;
             }
 
             try {
                 const datos = await ApiService.getRegistroParoById(claveParo);
+                const tiempo = await ApiService.getCorreoDuracion();
+                
+                console.log("Datos del tiempo:", tiempo);
+                setTiempoSegundos(tiempo.result.duracion_segundos);
                 console.log("Datos obtenidos de la API:", datos);
                 
                 const registro_prod = await ApiService.getProduccion(datos.result.id_produccion);
@@ -43,33 +49,31 @@ export const EnviarCorreoxHoraProvider = ({ children }) => {
         obtenerDatosParo();
     }, [claveParo]);
 
-    // --- EFECTO 2: Controlar el temporizador recurrente cada 2 horas ---
+    // --- EFECTO 2: Controlar el temporizador recurrente ---
     useEffect(() => {
-        // No hacer nada si faltan datos esenciales
-        if (!claveParo || !registroParo || !produccion) return;
+        // Validación estricta: No continuar si falta algún dato fundamental
+        if (!claveParo || !registroParo || !produccion || tiempoSegundos === null) return;
 
         const revisarTiempo = async () => {
             const ahora = new Date();
             
-            // 1. Separar y asegurar formato de dos dígitos para día y mes
+            // 1. Parsear fecha
             const [dia, mes, anio] = registroParo.fecha_produccion.split('/');
             const diaPad = dia.padStart(2, '0');
             const mesPad = mes.padStart(2, '0');
 
-            // 2. Fusionar en formato estándar ISO
             const formatoISO = `${anio}-${mesPad}-${diaPad}T${registroParo.hora_inicio}`;
             const inicio = new Date(formatoISO);
 
-            // 3. Validar que la fecha sea válida
             if (isNaN(inicio.getTime())) return;
 
-            // 4. Calcular horas transcurridas reales (diferencia ms / ms en 1 hora)
+            // 2. Horas transcurridas
             const diferenciaMs = ahora - inicio;
             const horasTranscurridas = diferenciaMs / (1000 * 60 * 60);
 
-            // 5. Determinar la siguiente meta de reporte (2h, 4h, 6h, etc.)
-            const tiempo_reporte = 2;
-            const siguienteMeta = horasReportadas + tiempo_reporte;
+            // 3. Siguiente meta (segundos a horas)
+            const tiempoReporteHoras = tiempoSegundos / 3600;
+            const siguienteMeta = horasReportadas + tiempoReporteHoras;
 
             console.log(`Horas transcurridas: ${horasTranscurridas.toFixed(2)}h | Siguiente meta: ${siguienteMeta}h`);
 
@@ -89,23 +93,19 @@ export const EnviarCorreoxHoraProvider = ({ children }) => {
                         paro: registroParo.paro
                     });
 
-                    // Actualizamos el hito alcanzado para esperar las siguientes 2 horas
                     setHorasReportadas(siguienteMeta);
-                    console.log(`Correo enviado con éxito. Próximo aviso a las ${siguienteMeta + 2} horas.`);
+                    console.log(`Correo enviado con éxito. Próximo aviso en +${tiempoReporteHoras} horas.`);
                 } catch (error) {
                     console.error("Error al enviar el correo automático:", error);
                 }
             }
         };
 
-        // Ejecutar revisión inmediata
         revisarTiempo();
-
-        // Configurar revisión continua cada minuto
         const intervalo = setInterval(revisarTiempo, 60000);
 
         return () => clearInterval(intervalo);
-    }, [claveParo, registroParo, produccion, horasReportadas, user]);
+    }, [claveParo, registroParo, produccion, horasReportadas, user, tiempoSegundos]);
 
     return (
         <EnviarCorreoxHora.Provider value={{ registroParo, horasReportadas }}>

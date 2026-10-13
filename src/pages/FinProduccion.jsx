@@ -19,7 +19,7 @@ import {
   WifiOff,
   RefreshCw
 } from 'lucide-react';
-import { ApiService, validarClave } from '../services/ApiService';
+import { ApiService, estaCerrado, validarClave } from '../services/ApiService';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 
 
@@ -57,6 +57,7 @@ export default function FinProduccion() {
   const [isSavingConteo, setIsSavingConteo] = useState(false);
   const [cierreError, setCierreError] = useState(null);
   const [initError, setInitError] = useState(null);
+  const [paroDespejeConfirmado, setParoDespejeConfirmado] = useState(false);
   const navigate = useNavigate();
   const inicializadoRef = useRef(false);
   // Actualizar el reloj cada minuto
@@ -69,7 +70,40 @@ export default function FinProduccion() {
         inicializadoRef.current = true;
         setInitError(null);
 
-        await iniciaParo();
+        const registroResponse = await ApiService.getProduccion(claveProduccion);
+        const registroActual = registroResponse?.result;
+
+        // ANTIFANTASMA: si la producción ya quedó cerrada (estatus false y hora
+        // de término real), NO se recrea el paro DESPEJE; se retoma el cierre.
+        if (estaCerrado(registroActual)) {
+          if (claveParo) {
+            try {
+              console.log('Paro DESPEJE sobrante sin cerrar');
+              await cerrarParo({ hora_termino: obtenerHoraActual(), fecha_termino: hoy(), estatus: false });
+              
+            } catch (e) {
+              console.warn('Paro DESPEJE sobrante sin cerrar:', e);
+            }
+          }
+          
+          limpiarProduccion();
+          if (tipo_cierreContext === 'FIN_LOTE') {
+            if (registroActual.id_lote && registroActual.id_maquina) {
+              try {
+                await cierreLoteData(registroActual.id_lote, registroActual.id_maquina);
+              } catch (e) {
+                console.warn('No se pudo cerrar el lote en el reintento:', e);
+              }
+            }
+            setShowModal(true);
+          } else {
+            confirmarCierreTurno();
+          }
+          return;
+        }
+
+        await iniciaParo(registroActual);
+        setParoDespejeConfirmado(true);
 
         setOperador(user);
         if (tipoCierre?.tipoCierre === "FIN_TURNO") {
@@ -148,6 +182,11 @@ export default function FinProduccion() {
       return;
     }
 
+    if (!paroDespejeConfirmado) {
+      setCierreError('El paro de despeje no está confirmado. Verifica tu conexión.');
+      return;
+    }
+
     // Si hay más dañadas que buenas, abrimos el modal para confirmar
     if (danadasNum > producidasNum) {
       setShowModalConteo(true);
@@ -176,24 +215,48 @@ export default function FinProduccion() {
   };
 
   const guardarProduccion = async () => {
+    console.log("claveProduccion:", claveProduccion);
+    console.log("Guardando produccion y piezas")
     const proudccionData = {
       piezas_buenas: producidasNum,
       piezas_producidas: totalPiezas,
-      estatus: true,
       piezas_malas: danadasNum,
-      hora_termino: "00:00:00",
       tipo_cierre: tipo_cierreContext,
     };
-    const response = await ApiService.updateProduccion(claveProduccion, proudccionData);
+    console.log("proudccionData:", proudccionData);
+    await ApiService.updateProduccion(claveProduccion, proudccionData);
   }
-  const iniciaParo = async () => {
-    const dataRegistro = await ApiService.getProduccion(claveProduccion);
-    setClaveLote(dataRegistro.result.id_lote);
-    setClaveMaquina(dataRegistro.result.id_maquina);
+
+  const esperar = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+  // Verificación por lectura: el paro DESPEJE debe existir y quedar abierto.
+  const verificarParoAbierto = async (clave) => {
+    for (let intento = 1; intento <= 3; intento++) {
+      try {
+        const reg = await ApiService.getRegistroParoById(clave);
+        const r = reg?.result;
+        if (r && r.estatus === true && !!r.hora_inicio) {
+          return;
+        }
+      } catch (error) {
+        console.warn('No se pudo confirmar el paro de despeje (intento ' + intento + '):', error);
+      }
+      await esperar(500 * intento);
+    }
+    throw new Error('No se pudo confirmar el paro de despeje. Reintenta.');
+  }
+
+  const iniciaParo = async (registroData) => {
+    if (!registroData) {
+      throw new Error('No se encontró el registro de producción activo.');
+    }
+    setClaveLote(registroData.id_lote);
+    setClaveMaquina(registroData.id_maquina);
 
     // Si ya hay un paro activo para esta producción (ej. recarga/remount de la
     // pantalla de cierre), se reutiliza en vez de crear uno duplicado.
     if (claveParo) {
+      await verificarParoAbierto(claveParo);
       return;
     }
 
@@ -206,25 +269,25 @@ export default function FinProduccion() {
     });
     const paro = await getParoProgramado();
     const dataParo = {
-      id_turno: dataRegistro.result.id_turno,
-      id_producto: dataRegistro.result.id_producto,
-      id_lote: dataRegistro.result.id_lote,
-      id_maquina: dataRegistro.result.id_maquina,
+      id_turno: registroData.id_turno,
+      id_producto: registroData.id_producto,
+      id_lote: registroData.id_lote,
+      id_maquina: registroData.id_maquina,
       id_operador: user.id,
-      nombre_operador: user.nombre + " " + user.apellidoP + " " + user.apellidoM,
+      operador: user.nombre + " " + user.apellidoP + " " + user.apellidoM,
       id_produccion: claveProduccion,
       id_paro: paro.id_paro,
       descripcion_paro: paro.descripcion,
       paro: paro.nombre,
-      turno: dataRegistro.result.turno,
-      lote: dataRegistro.result.lote,
-      maquina: dataRegistro.result.maquina,
-      producto: dataRegistro.result.producto,
+      turno: registroData.turno,
+      lote: registroData.lote,
+      maquina: registroData.maquina,
+      producto: registroData.producto,
       hora_inicio: hora,
-      hora_termino: "00:00:00",
+      hora_termino: "",
       fecha_produccion: fechaFormateada,
       estatus: true,
-      id_semana: dataRegistro.result.id_semana,
+      id_semana: registroData.id_semana,
     };
     const response = await ApiService.insertRegistroParo(dataParo);
     const claveParoNombre = response?.result?.name;
@@ -232,17 +295,51 @@ export default function FinProduccion() {
       throw new Error('El servidor no devolvió una clave para el paro de despeje');
     }
     iniciarParo(claveParoNombre);
+
+    // Verificación por lectura: confirma que el paro quedó registrado y abierto.
+    await verificarParoAbierto(claveParoNombre);
   }
+
+  // Cierre de producción con verificación por lectura (write + read-back).
+  // El paro no se toca hasta que la producción quede confirmada como cerrada.
+  const cerrarProduccionVerificada = async (idProduccion, data) => {
+    console.log("cerrarProduccionVerificada");
+    console.log("data:", data);
+    console.log("idProduccion:", idProduccion);
+    for (let intento = 1; intento <= 3; intento++) {
+      try {
+        const respuesta = await ApiService.updateProduccion(idProduccion, data);
+        console.log("respuesta cierre",respuesta);
+      } catch (error) {
+        console.warn('Fallo al cerrar la producción (intento ' + intento + '):', error);
+      }
+      try {
+        const reg = await ApiService.getProduccion(idProduccion);
+        if (estaCerrado(reg?.result)) {
+          return;
+        }
+      } catch (error) {
+        console.warn('No se pudo verificar la producción (intento ' + intento + '):', error);
+      }
+      await esperar(500 * intento);
+    }
+    throw new Error('No se pudo confirmar el cierre de la producción. Reintenta.');
+  }
+
   const cierre = async () => {
-    // SEGURO: sin clave de paro DESPEJE activa no se procede
-    validarClave(claveParo, 'cerrarParo DESPEJE');
     const hora = obtenerHoraActual();
     const fecha = hoy();
     const data = { hora_termino: hora, fecha_termino: fecha, estatus: false };
+    console.log(data);
+    // Primero la producción, con verificación por lectura: si no se confirma,
+    // el paro no se toca y el reintento es consistente.
+    console.log('cerrarProduccionVerificada');
+    //const response=await ApiService.updateProduccion(claveProduccion, data);
+    //console.log("Cierre de producccion",response);
+    await cerrarProduccionVerificada(claveProduccion, data);
 
-    // Primero se cierra la producción y luego el paro (con verificación por lectura).
-    // Si la producción falla, el paro no se toca y el reintento es consistente.
-    await ApiService.updateProduccion(claveProduccion, data);
+    // SEGURO: sin clave de paro DESPEJE activa no se procede con el paro
+    validarClave(claveParo, 'cerrarParo DESPEJE');
     await cerrarParo(data);
   }
 
@@ -438,8 +535,8 @@ export default function FinProduccion() {
             ) : (
               <button
                 type="submit"
-                disabled={isSubmitting}
-                className={`w-full py-6 px-8 rounded-2xl flex items-center justify-center text-2xl font-bold text-white shadow-lg transition-all active:scale-[0.98] ${isSubmitting
+                disabled={isSubmitting || !paroDespejeConfirmado}
+                className={`w-full py-6 px-8 rounded-2xl flex items-center justify-center text-2xl font-bold text-white shadow-lg transition-all active:scale-[0.98] ${isSubmitting || !paroDespejeConfirmado
                   ? 'bg-blue-400 cursor-not-allowed'
                   : 'bg-blue-600 hover:bg-blue-700 hover:shadow-xl'
                   }`}

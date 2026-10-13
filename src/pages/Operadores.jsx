@@ -46,7 +46,7 @@ const iconMap = {
 
 export default function Operadores() {
   const { claveProduccion, tipo_cierreContext, setTipoCierreContext } = useProduccion();
-  const { claveParo, iniciarParo, cerrarParo } = useParo();
+  const { claveParo, iniciarParo, cerrarParo, actualizarTipoParo } = useParo();
   const [dataParo, setDataParo] = useState({});
   const datosCorreo = useContext(EnviarCorreoxHora);
   //const [paroTime, setParoTime] = useState(0);
@@ -267,8 +267,21 @@ export default function Operadores() {
   };
 
   // NUEVA FUNCIÓN: Al hacer clic en un motivo
-  const handleSelectMotivo = (paro) => {
+  const handleSelectMotivo = async (paro) => {
     if (!isParo) return; // Si no hay paro activo, no hace nada
+
+    try {
+      await actualizarTipoParo({
+        id_paro: paro.id_paro,
+        paro: paro.nombre,
+        descripcion_paro: paro.clave === 'OTRO' ? descripcionManual : paro.descripcion,
+      });
+    } catch (error) {
+      console.error("Error al actualizar el tipo de paro:", error);
+      alert("No se pudo guardar el tipo de paro. Verifica tu conexión e intenta de nuevo.");
+      return;
+    }
+
     setSelectedParo(paro);
     if (paro.clave === 'OTRO') {
       setDescripcionManual(''); // Limpiamos descripción previa
@@ -498,10 +511,20 @@ export default function Operadores() {
                   Cancelar
                 </button>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     if (!descripcionManual.trim()) return alert("Por favor ingresa una descripción");
+                    try {
+                      await actualizarTipoParo({
+                        id_paro: selectedParo.id_paro,
+                        paro: selectedParo.nombre,
+                        descripcion_paro: descripcionManual,
+                      });
+                    } catch (error) {
+                      console.error("Error al actualizar la descripción del paro:", error);
+                      alert("No se pudo guardar la descripción. Verifica tu conexión e intenta de nuevo.");
+                      return;
+                    }
                     setShowModalOtro(false);
-                    // Opcional: Después de llenar, podrías mostrar la modal de confirmación o dejarlo ya seleccionado
                   }}
                   className="flex-1 px-4 py-3 rounded-xl bg-amber-500 text-white font-bold shadow-lg hover:bg-amber-600 transition-all"
                 >

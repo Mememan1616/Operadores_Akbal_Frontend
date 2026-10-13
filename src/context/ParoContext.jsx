@@ -1,5 +1,5 @@
 import React, { createContext, useState, useContext } from 'react';
-import { ApiService, validarClave } from '../services/ApiService';
+import { ApiService, validarClave, estaCerrado } from '../services/ApiService';
 
 // 1. Creamos el contexto
 export const ParoContext = createContext(null);
@@ -49,8 +49,14 @@ export const ParoProvider = ({ children }) => {
     throw new Error('No se pudo confirmar el cierre del paro. Reintenta.');
   };
 
+  // 6. Actualiza el tipo de paro en la BD apenas se elige, sin cerrar el paro
+  const actualizarTipoParo = async (data) => {
+    validarClave(claveParo, 'actualizarTipoParo');
+    return await ApiService.updateRegistroParo(claveParo, data);
+  };
+
   return (
-    <ParoContext.Provider value={{ claveParo, iniciarParo, terminarParo, cerrarParo }}>
+    <ParoContext.Provider value={{ claveParo, iniciarParo, terminarParo, cerrarParo, actualizarTipoParo }}>
       {children}
     </ParoContext.Provider>
   );
@@ -61,13 +67,13 @@ export const useParo = () => {
   return useContext(ParoContext);
 };
 
-// Verificación por lectura: confirma que el paro quedó realmente cerrado en la BD.
+// Verificación por lectura: confirma que un registro quedó cerrado en la BD.
+// Reusado para producción y paros (estatus false + hora de término real).
 // Si la lectura falla (red), se trata como no confirmado para reintentar.
 const verificarCierre = async (clave) => {
   try {
     const registro = await ApiService.getRegistroParoById(clave);
-    const r = registro?.result;
-    return r && r.estatus === false && !!r.hora_termino && r.hora_termino !== "00:00:00";
+    return estaCerrado(registro?.result);
   } catch {
     return false;
   }

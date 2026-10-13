@@ -1,3 +1,18 @@
+// Estado de los mocks de dev: reflejan el resultado de las escrituras
+// para que las verificaciones por lectura (read-back) funcionen en localhost.
+let devProduccionCerrada = false;
+let devParoCerrado = false;
+
+// Lanza si el backend reporta un error explícito (success:false) o implícito
+// (error:true). El flujo de cierre depende de que un fallo NO pase en silencio.
+const validarRespuesta = (resp, accion) => {
+  if (!resp || resp.success === false || resp.error === true) {
+    const detalle = resp?.error || resp?.message || 'respuesta vacía del servidor';
+    throw new Error(`${accion}: ${detalle}`);
+  }
+  return resp;
+};
+
 const runGoogle = (serverFunction, params) => {
     return new Promise((resolve, reject) => {
 
@@ -184,6 +199,9 @@ const runGoogle = (serverFunction, params) => {
                 })
             }
             if (params.action === 'updateProduccion') {
+                if (params.data && params.data.estatus === false) {
+                    devProduccionCerrada = true;
+                }
                 return resolve({
                     response: 'Hello from updateProduccion!',
                     status: 200,
@@ -191,6 +209,9 @@ const runGoogle = (serverFunction, params) => {
                 })
             }
             if (params.action === 'updateRegistroParo') {
+                if (params.data && params.data.estatus === false) {
+                    devParoCerrado = true;
+                }
                 return resolve({
                     response: 'Hello from updateRegistroParo!',
                     status: 200,
@@ -202,14 +223,14 @@ const runGoogle = (serverFunction, params) => {
                     response: 'Hello from getProduccion!',
                     status: 200,
                     result: {
-                        hora_termino: "00:00:00",
+                        hora_termino: devProduccionCerrada ? "18:05:00" : "00:00:00",
                         id_operador: "1.0",
                         hora_inicio: "14:50:15",
                         maquina: "maquina1",
                         lote: "lote1",
                         turno: "turno1",
                         piezas_malas: 0.0,
-                        estatus: true,
+                        estatus: devProduccionCerrada ? false : true,
                         id_producto: "producto1id",
                         producto: "producto1",
                         id_maquina: "maquina1id",
@@ -256,8 +277,8 @@ const runGoogle = (serverFunction, params) => {
                     result: {
                         fecha_produccion: "22/05/2026",
                         hora_inicio: "09:00:00",
-                        hora_termino: "10:00:00",
-                        estatus: false,
+                        hora_termino: devParoCerrado ? "18:05:00" : "00:00:00",
+                        estatus: devParoCerrado ? false : true,
                         id_operador: "-OqfEBbZtZ1XAR3FuUxO",
                         id_paro: "paro6",
                         id_produccion: "-OtEcYkZtxtRZJLxEj5E",
@@ -424,6 +445,16 @@ export const validarClave = (clave, accion) => {
         throw new Error(`${accion}: clave inválida (${clave})`);
     }
 };
+// Un registro quedó "cerrado" cuando tiene estatus false y hora de término real.
+export const estaCerrado = (registro) => {
+   console.log(registro);
+   if(!registro || registro.estatus==true){
+    console.log('no ha cerrado'); 
+    return false;
+   }
+   else return true;
+   
+};
 export const ApiService = {
     // --- Prueba ---
     async testAppscript() {
@@ -510,7 +541,7 @@ export const ApiService = {
                 action: 'insertRegistroParo',
                 data: data
             });
-            return result;
+            return validarRespuesta(result, 'insertRegistroParo');
         } catch (error) {
             console.error('Error en insertRegistroParo:', error);
             throw error;
@@ -522,7 +553,7 @@ export const ApiService = {
                 action: 'insertProduccion',
                 data: data
             });
-            return result;
+            return validarRespuesta(result, 'insertProduccion');
         } catch (error) {
             console.error('Error en insertProduccion:', error);
             throw error;
@@ -536,7 +567,7 @@ export const ApiService = {
                 id: id,
                 data: data
             });
-            return result;
+            return validarRespuesta(result, 'updateProduccion');
         } catch (error) {
             console.error('Error en updateProduccion:', error);
             throw error;
@@ -567,7 +598,7 @@ export const ApiService = {
                 id_lote: id_lote,
                 id_maquina: id_maquina
             });
-            return result;
+            return validarRespuesta(result, 'cerrarLote');
         } catch (error) {
             console.error('Error en cerrarLote:', error);
             throw error;
@@ -580,7 +611,7 @@ export const ApiService = {
                 action: 'getProduccion',
                 id: id
             });
-            return result;
+            return validarRespuesta(result, 'getProduccion');
         } catch (error) {
             console.error('Error en getProduccion:', error);
             throw error;
@@ -642,7 +673,7 @@ export const ApiService = {
                 action: 'getRegistroParoById',
                 id: claveParo
             });
-            return result;
+            return validarRespuesta(result, 'getRegistroParoById');
         } catch (error) {
             console.error('Error en getRegistroParoById:', error);
             throw error;
@@ -690,6 +721,17 @@ export const ApiService = {
             console.error('Error en setCorreo:', error);
             throw error;
         }
-    }
+    },
+    async getCorreoDuracion() {
+        try {
+            const result = await runGoogle('apiHandler', {
+                action: 'getCorreoDuracion'
+            });
+            return result;
+        } catch (error) {
+            console.error('Error en getCorreoDuracion:', error);
+            throw error;
+        }
+    },
 
 }
