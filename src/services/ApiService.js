@@ -734,4 +734,20 @@ export const ApiService = {
         }
     },
 
+    async  loginByEmail(email,password){
+        try{
+            const result = await runGoogle('apiHandler', {
+                action: 'loginByEmail',
+                email: email,
+                password: password
+            });
+            return result;
+
+        }catch(error){
+            console.error('Error en loginByEmail:', error);
+            throw error;
+        }
+
+    }
+
 }

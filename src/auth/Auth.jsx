@@ -1,6 +1,6 @@
 // src/auth/Auth.jsx
 import React, { useState, createContext, useContext } from 'react';
-import { useNavigate } from 'react-router-dom'; // IMPORTANTE: Para redireccionar
+import { Navigate, useNavigate } from 'react-router-dom'; // IMPORTANTE: Para redireccionar
 import { AlertTriangle, Lock, LogIn } from 'lucide-react';
 import { ApiService } from '../services/ApiService';
 
@@ -38,7 +38,7 @@ export const AuthProvider = ({ children }) => {
 
 // 3. EXPORTAMOS POR DEFECTO LA PANTALLA DE LOGIN
 export default function LoginScreen() {
-  const { login } = useContext(AuthContext);
+  const { login, user } = useContext(AuthContext);
   const navigate = useNavigate(); // Hook para cambiar de ruta
   const {AuthProvider} = useContext(AuthContext);
   const [username, setUsername] = useState('');
@@ -64,6 +64,11 @@ export default function LoginScreen() {
     
   };
   
+
+  // Si ya hay sesión activa, el login no es una pantalla válida.
+  if (user) {
+    return <Navigate to="/inicio-produccion" replace />;
+  }
 
   return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">

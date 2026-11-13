@@ -30,7 +30,9 @@ export default function FinProduccion() {
   const { claveProduccion, limpiarProduccion, tipo_cierreContext } = useProduccion();
   const { claveParo, iniciarParo, cerrarParo } = useParo();
   const location = useLocation();
-  const tipoCierre = location.state;
+  // El tipo de cierre se deriva del contexto persistido para sobrevivir a un F5
+  // o a un atrás/adelante. location.state queda solo como respaldo.
+  const tipoCierreEfectivo = tipo_cierreContext || location.state?.tipoCierre || null;
   const isOnline = useOnlineStatus();
   // Estados para el formulario
   const [piezasProducidas, setPiezasProducidas] = useState('');
@@ -49,7 +51,7 @@ export default function FinProduccion() {
   const [claveLote, setClaveLote] = useState('');
   const [claveMaquina, setClaveMaquina] = useState('');
   const [showModal, setShowModal] = useState(false);
-  const [cierreLote, setcierreLote] = useState(true);
+  const [cierreLote, setcierreLote] = useState(tipo_cierreContext !== 'FIN_TURNO');
   const [showModalDespeje, setShowModalDespeje] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [showModalConteo, setShowModalConteo] = useState(false);
@@ -60,8 +62,18 @@ export default function FinProduccion() {
   const [paroDespejeConfirmado, setParoDespejeConfirmado] = useState(false);
   const navigate = useNavigate();
   const inicializadoRef = useRef(false);
+  // Entrada inválida: no hay producción ni tipo de cierre con el que operar.
+  // Se evalúa una sola vez para no interferir con la limpieza posterior al cierre.
+  const rutaInicialInvalidaRef = useRef(
+    (() => {
+      if (!claveProduccion) return '/inicio-produccion';
+      if (!tipoCierreEfectivo) return '/operadores';
+      return null;
+    })()
+  );
   // Actualizar el reloj cada minuto
   useEffect(() => {
+    if (rutaInicialInvalidaRef.current) return;
     // Si ya se ejecutó una vez, abortamos para no saturar a Google
     if (inicializadoRef.current) return;
 
@@ -69,6 +81,13 @@ export default function FinProduccion() {
       try {
         inicializadoRef.current = true;
         setInitError(null);
+        setTitle(
+          tipo_cierreContext === 'FIN_LOTE'
+            ? 'Lote'
+            : tipo_cierreContext === 'FIN_TURNO'
+              ? 'Turno'
+              : (location.state?.title || 'Cierre')
+        );
 
         const registroResponse = await ApiService.getProduccion(claveProduccion);
         const registroActual = registroResponse?.result;
@@ -80,12 +99,12 @@ export default function FinProduccion() {
             try {
               console.log('Paro DESPEJE sobrante sin cerrar');
               await cerrarParo({ hora_termino: obtenerHoraActual(), fecha_termino: hoy(), estatus: false });
-              
+
             } catch (e) {
               console.warn('Paro DESPEJE sobrante sin cerrar:', e);
             }
           }
-          
+
           limpiarProduccion();
           if (tipo_cierreContext === 'FIN_LOTE') {
             if (registroActual.id_lote && registroActual.id_maquina) {
@@ -106,12 +125,9 @@ export default function FinProduccion() {
         setParoDespejeConfirmado(true);
 
         setOperador(user);
-        if (tipoCierre?.tipoCierre === "FIN_TURNO") {
+        if (tipoCierreEfectivo === "FIN_TURNO") {
           setcierreLote(false);
         }
-
-        const titulo = tipoCierre?.title || 'Cierre';
-        setTitle(titulo);
 
       } catch (error) {
         console.error("Error al inicializar el cierre:", error);
@@ -309,7 +325,7 @@ export default function FinProduccion() {
     for (let intento = 1; intento <= 3; intento++) {
       try {
         const respuesta = await ApiService.updateProduccion(idProduccion, data);
-        console.log("respuesta cierre",respuesta);
+        console.log("respuesta cierre", respuesta);
       } catch (error) {
         console.warn('Fallo al cerrar la producción (intento ' + intento + '):', error);
       }
@@ -326,7 +342,7 @@ export default function FinProduccion() {
     throw new Error('No se pudo confirmar el cierre de la producción. Reintenta.');
   }
 
-  const cierre = async () => {
+  /*const cierre = async () => {
     const hora = obtenerHoraActual();
     const fecha = hoy();
     const data = { hora_termino: hora, fecha_termino: fecha, estatus: false };
@@ -341,7 +357,30 @@ export default function FinProduccion() {
     // SEGURO: sin clave de paro DESPEJE activa no se procede con el paro
     validarClave(claveParo, 'cerrarParo DESPEJE');
     await cerrarParo(data);
+  }*/
+ const cierre = async () => {
+  // Congelar claves al inicio
+  const idProdActual = claveProduccion;
+  const idParoActual = claveParo;
+
+  if (!idProdActual) {
+    console.warn("Intento de cierre sin claveProduccion activa.");
+    return;
   }
+
+  const hora = obtenerHoraActual();
+  const fecha = hoy();
+  const data = { hora_termino: hora, fecha_termino: fecha, estatus: false };
+
+  // 1. Cerrar producción usando la variable local
+  await cerrarProduccionVerificada(idProdActual, data);
+
+  // 2. Cerrar paro solo si existe y validando la variable local congelada
+  if (idParoActual) {
+    validarClave(idParoActual, 'cerrarParo DESPEJE');
+    await cerrarParo(data);
+  }
+};
 
   const cierreLoteData = async (id_lote, id_maquina) => {
     await ApiService.cerrarLote(id_lote, id_maquina);
@@ -381,7 +420,7 @@ export default function FinProduccion() {
   }
 
   const iniciarNuevoLote = () => {
-    navigate('/inicio-produccion');
+    navigate('/inicio-produccion', { replace: true });
     setShowModal(false);
 
   };
@@ -389,7 +428,7 @@ export default function FinProduccion() {
     logout();
     //setShowModal(false);
   }
-
+  /*
   const cierraDespeje = async () => {
     setIsClosingDespeje(true);
     setCierreError(null);
@@ -412,7 +451,49 @@ export default function FinProduccion() {
     } finally {
       setIsClosingDespeje(false);
     }
+  }*/
+ const cierraDespeje = async () => {
+  setIsClosingDespeje(true);
+  setCierreError(null);
+
+  try {
+    await cierre();
+    setShowModalDespeje(false);
+
+    if (tipo_cierreContext === "FIN_LOTE") {
+      if (claveLote && claveMaquina) {
+        await cierreLoteData(claveLote, claveMaquina);
+      }
+      limpiarProduccion();
+      setShowModal(true);
+    } else {
+      limpiarProduccion();
+      confirmarCierreTurno();
+    }
+  } catch (error) {
+    console.error("Error al cerrar el despeje:", error);
+    
+    // Si la clave ya no existe en el contexto, significa que el ciclo de limpieza 
+    // ya ocurrió y los datos ya se enviaron; salimos normalmente en vez de mostrar error
+    if (!claveProduccion) {
+      if (tipo_cierreContext === "FIN_LOTE") {
+        setShowModal(true);
+      } else {
+        confirmarCierreTurno();
+      }
+      return;
+    }
+
+    setCierreError(error.message || 'Error al cerrar. Verifica tu conexión.');
+  } finally {
+    setIsClosingDespeje(false);
   }
+};
+  // --- RENDER DEL GUARDIÁN ---
+  if (rutaInicialInvalidaRef.current) {
+    return <Navigate to={rutaInicialInvalidaRef.current} replace />;
+  }
+
   return (
     <div>
 
@@ -715,8 +796,8 @@ export default function FinProduccion() {
                 {/* Botón: Continuar (Con estado de carga) */}
                 <button
                   className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-white font-bold shadow-lg transition-all ${isSavingConteo
-                      ? 'bg-green-400 cursor-not-allowed'
-                      : 'bg-green-600 hover:bg-green-700 active:scale-95'
+                    ? 'bg-green-400 cursor-not-allowed'
+                    : 'bg-green-600 hover:bg-green-700 active:scale-95'
                     }`}
                   onClick={Guardar}
                   disabled={isSavingConteo}
@@ -743,8 +824,8 @@ export default function FinProduccion() {
                   onClick={() => setShowModalConteo(false)}
                   disabled={isSavingConteo}
                   className={`flex-1 flex items-center justify-center gap-2 px-3 py-3 rounded-xl font-bold transition-all ${isSavingConteo
-                      ? 'bg-slate-50 text-slate-400 cursor-not-allowed'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200 active:scale-95'
+                    ? 'bg-slate-50 text-slate-400 cursor-not-allowed'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200 active:scale-95'
                     }`}
                 >
                   <XCircle className="w-5 h-5" />

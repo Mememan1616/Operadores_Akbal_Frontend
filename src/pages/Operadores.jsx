@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useContext, useRef } from 'react';
-import { ApiService } from '../services/ApiService';
+import { ApiService, estaCerrado } from '../services/ApiService';
 import { AuthContext } from '../auth/Auth';
 import { useProduccion } from '../context/ProduccionContex';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { useParo } from '../context/ParoContext';
 import { EnviarCorreoxHora } from '../context/EnviarCorreoxHoraParp';
 //import { ProduccionContext } from '../context/ProduccionContex';
@@ -66,6 +66,14 @@ export default function Operadores() {
   const isParo = !!claveParo;
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
+
+  // --- GUARDIÁN DE PANTALLA ---
+  // Operadores solo es válida con una producción iniciada y abierta.
+  const [guardState, setGuardState] = useState(
+    !claveProduccion ? 'to-inicio' : tipo_cierreContext ? 'to-fin' : 'checking'
+  );
+  const [loadError, setLoadError] = useState('');
+  const [reintento, setReintento] = useState(0);
   const [maquina, setMaquina] = useState('');
   const [dataRegistro, setDataRegistro] = useState({});
   const [showModalOtro, setShowModalOtro] = useState(false);
@@ -76,32 +84,55 @@ export default function Operadores() {
 
   const [selectedParo, setSelectedParo] = useState(null);
 
-  // Efecto para manejar el cronómetro cuando isParo es true
-  // --- EFECTO 1: CARGA DE DATOS (UNIFICADO Y PROTEGIDO) ---
+  // --- EFECTO 1: CARGA DE DATOS + GUARDIÁN DE PANTALLA ---
   useEffect(() => {
-   
-    const cargarInformacionIncial = async () => {
+    if (!claveProduccion) {
+      setGuardState('to-inicio');
+      return;
+    }
+    if (tipo_cierreContext) {
+      setGuardState('to-fin');
+      return;
+    }
+
+    let cancelado = false;
+    const cargarInformacionInicial = async () => {
       isInitialLoad.current = true; // Bloqueo inmediato
+      setLoadError('');
+      setGuardState('checking');
       try {
         const response = await ApiService.getProduccion(claveProduccion);
-        if (response && response.result) {
-          setDataRegistro(response);
-          setMaquina(response.result.maquina || '');
+        const registro = response?.result;
+        if (cancelado) return;
 
-          // Cargamos paros inmediatamente después
-          if (response.result.id_maquina) {
-            const resParos = await ApiService.getParosByMaquina(response.result.id_maquina);
-            setParos(Array.isArray(resParos?.result) ? resParos.result : []);
-          }
+        // Sin producción, cerrada o sin lote/máquina asignados no hay operación que mostrar.
+        if (!registro || estaCerrado(registro) || !registro.id_lote || !registro.id_maquina) {
+          setGuardState('to-inicio');
+          return;
         }
+
+        setDataRegistro(response);
+        setMaquina(registro.maquina || '');
+
+        // Cargamos paros inmediatamente después
+        if (registro.id_maquina) {
+          const resParos = await ApiService.getParosByMaquina(registro.id_maquina);
+          if (!cancelado) setParos(Array.isArray(resParos?.result) ? resParos.result : []);
+        }
+        if (!cancelado) setGuardState('ok');
       } catch (error) {
         console.error("Fallo carga inicial:", error);
         isInitialLoad.current = false; // Permitir reintento solo si falló
+        if (!cancelado) {
+          setLoadError('No se pudo cargar la producción. Verifica tu conexión e intenta de nuevo.');
+          setGuardState('error');
+        }
       }
     };
 
-    cargarInformacionIncial();
-  }, [claveProduccion]);
+    cargarInformacionInicial();
+    return () => { cancelado = true; };
+  }, [claveProduccion, tipo_cierreContext, reintento]);
 
   // --- EFECTO 2: CRONÓMETRO (LIMPIO) ---
   const [paroTime, setParoTime] = useState(0);
@@ -179,6 +210,10 @@ export default function Operadores() {
   // NUEVA FUNCIÓN: Maneja el clic en el botón gigante
   const handleMainButtonClick = async () => {
     if (isLoading) return;
+    if (!dataRegistro?.result) {
+      alert('La producción aún no está cargada. Espera un momento e intenta de nuevo.');
+      return;
+    }
     setIsLoading(true);
     try {
       const fecha = new Date();
@@ -312,15 +347,45 @@ export default function Operadores() {
 
   const handleCloseTurno = () => {
     setTipoCierreContext('FIN_TURNO');
-    navigate('/fin-produccion', { state: { tipoCierre: 'FIN_TURNO', title: 'Turno' } });
+    navigate('/fin-produccion', { state: { tipoCierre: 'FIN_TURNO', title: 'Turno' }, replace: true });
     setShowModalConfirmar(false);
   };
 
 
   const handleConfirmCloseLote = () => {
     setTipoCierreContext('FIN_LOTE');
-    navigate('/fin-produccion', { state: { tipoCierre: 'FIN_LOTE', title: 'Lote' } });
+    navigate('/fin-produccion', { state: { tipoCierre: 'FIN_LOTE', title: 'Lote' }, replace: true });
     setShowModalConfirmar(false);
+  }
+
+  // --- RENDER DEL GUARDIÁN ---
+  if (guardState === 'to-inicio') {
+    return <Navigate to="/inicio-produccion" replace />;
+  }
+  if (guardState === 'to-fin') {
+    return <Navigate to="/fin-produccion" replace />;
+  }
+  if (guardState === 'checking') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4">
+        <Loader2 className="w-10 h-10 animate-spin text-blue-600" />
+        <p className="text-slate-500 font-medium">Cargando producción...</p>
+      </div>
+    );
+  }
+  if (guardState === 'error') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4 px-6">
+        <AlertCircle className="w-12 h-12 text-red-500" />
+        <p className="text-red-700 font-medium text-center">{loadError}</p>
+        <button
+          onClick={() => setReintento((n) => n + 1)}
+          className="px-6 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors"
+        >
+          Reintentar
+        </button>
+      </div>
+    );
   }
 
   return (

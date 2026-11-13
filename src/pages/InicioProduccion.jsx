@@ -12,8 +12,8 @@ import {
   Settings,
   AlertCircle
 } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
-import { ApiService, validarClave } from '../services/ApiService';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { ApiService, estaCerrado, validarClave } from '../services/ApiService';
 import { AuthContext } from '../auth/Auth';
 import { useProduccion } from '../context/ProduccionContex';
 import { useParo } from '../context/ParoContext';
@@ -21,7 +21,7 @@ import { useOnlineStatus } from '../hooks/useOnlineStatus';
 export default function InicioProduccion() {
   const { user } = useContext(AuthContext);
   const { claveParo, iniciarParo, cerrarParo } = useParo();
-  const { claveProduccion, setClaveProduccion } = useProduccion();
+  const { claveProduccion, setClaveProduccion, tipo_cierreContext } = useProduccion();
   const [produccion, setProduccion] = useState({});
   const [formData, setFormData] = useState({
     turno: '',
@@ -53,6 +53,48 @@ export default function InicioProduccion() {
   const [showNoRelationModal, setShowNoRelationModal] = useState(false);
   //const [claveParo, setClaveParo] = useState('');
   const navigate = useNavigate();
+
+  // --- GUARDIÁN DE PANTALLA ---
+  // Esta pantalla solo es válida durante el setup inicial. Si la producción ya
+  // arrancó o ya está en cierre, redirigimos al paso correcto en vez de mostrar
+  // el modal de Setup colgado.
+  const [guardState, setGuardState] = useState(claveProduccion ? 'checking' : 'ok');
+  const [guardRetry, setGuardRetry] = useState(0);
+  // Solo verificamos el estado con el que se ENTRA a la pantalla. Las claves que
+  // crea esta misma pantalla durante el setup no deben re-disparar la verificación.
+  const estadoEntradaRef = useRef({ clave: claveProduccion, tipo: tipo_cierreContext });
+
+  useEffect(() => {
+    const { clave, tipo } = estadoEntradaRef.current;
+    if (!clave) {
+      setGuardState('ok');
+      return;
+    }
+    if (tipo) {
+      setGuardState('to-fin');
+      return;
+    }
+
+    let cancelado = false;
+    setGuardState('checking');
+    const verificarEstado = async () => {
+      try {
+        const response = await ApiService.getProduccion(clave);
+        const registro = response?.result;
+        if (cancelado) return;
+        if (registro && registro.id_lote && registro.id_maquina && !estaCerrado(registro)) {
+          setGuardState('to-operadores');
+        } else {
+          setGuardState('ok');
+        }
+      } catch (error) {
+        console.error('No se pudo verificar el estado de la producción:', error);
+        if (!cancelado) setGuardState('error');
+      }
+    };
+    verificarEstado();
+    return () => { cancelado = true; };
+  }, [guardRetry]);
 
   // Actualizar el reloj cada segundo
   useEffect(() => {
@@ -226,8 +268,10 @@ export default function InicioProduccion() {
   const getProduccionXMaquinaXProducto = async (id_maquina, id_producto) => {
     try {
       const response = await ApiService.getProduccion_ProductoXMaquina(id_maquina, id_producto);
+      console.log('getProduccionXMaquinaXProducto', response);
       const resultado = response.result;
-      return resultado[0];
+      console.log('getProduccionXMaquinaXProducto', resultado);
+      return resultado;
     } catch (err) {
       setProduccion([]);
     }
@@ -348,7 +392,7 @@ export default function InicioProduccion() {
       await cerrarParo(dataParo);
 
       setTimeout(() => {
-        navigate('/operadores');
+        navigate('/operadores', { replace: true });
       }, 1500);
     } catch (error) {
       console.error("Error al iniciar producción:", error);
@@ -406,6 +450,39 @@ export default function InicioProduccion() {
     label: l.lote,
     producto: l.producto // Guardamos el producto aquí para acceder fácil
   }));
+
+  // --- RENDER DEL GUARDIÁN ---
+  if (guardState === 'to-operadores') {
+    return <Navigate to="/operadores" replace />;
+  }
+  if (guardState === 'to-fin') {
+    return <Navigate to="/fin-produccion" replace />;
+  }
+  if (guardState === 'checking' || guardState === 'error') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4 px-6">
+        {guardState === 'checking' ? (
+          <>
+            <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent" />
+            <p className="text-slate-500 font-medium text-center">Verificando estado de la producción...</p>
+          </>
+        ) : (
+          <>
+            <AlertCircle className="w-12 h-12 text-red-500" />
+            <p className="text-red-700 font-medium text-center">
+              No se pudo verificar el estado de la producción. Verifica tu conexión.
+            </p>
+            <button
+              onClick={() => setGuardRetry((n) => n + 1)}
+              className="px-6 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-colors"
+            >
+              Reintentar
+            </button>
+          </>
+        )}
+      </div>
+    );
+  }
 
   // Vista de éxito cuando la producción ha iniciado
   if (isStarted) {
